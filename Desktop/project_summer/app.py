@@ -76,18 +76,18 @@ def initialize_langchain():
         logger.error(f"Error initializing LangChain: {e}")
         return None, None, None
 
-# Page configuration with modern design
+# Page configuration with clean design
 st.set_page_config(
     page_title="Medical AI Analyzer",
-    page_icon="🏥",
+    page_icon="⚕️",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Enhanced modern CSS styling
+# Clean minimalist CSS styling
 st.markdown("""
 <style>
-    /* Import modern fonts */
+    /* Import clean fonts */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
     /* Global reset and base styles */
@@ -96,291 +96,369 @@ st.markdown("""
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         margin: 0;
         padding: 0;
+        color: #ffffff;
+        min-height: 100vh;
     }
     
     /* Main container */
     .main {
-        background: transparent;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 0;
+        min-height: 100vh;
     }
     
     .block-container {
-        padding: 1rem 2rem;
+        padding: 2rem 3rem;
         max-width: 1200px;
         margin: 0 auto;
     }
     
-    /* Header section with glassmorphism */
+    /* Clean header section */
     .header-container {
         background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(20px);
-        border-radius: 24px;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
         padding: 3rem 2rem;
         margin: 2rem 0;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
         text-align: center;
     }
     
     .main-title {
-        font-size: 3.5rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #ffffff 0%, #f8f9ff 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        font-size: 2.5rem;
+        font-weight: 600;
+        color: #ffffff;
         margin: 0;
         letter-spacing: -0.02em;
-        line-height: 1.1;
+        line-height: 1.2;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     }
     
     .subtitle {
         color: rgba(255, 255, 255, 0.8);
-        font-size: 1.3rem;
+        font-size: 1.1rem;
         font-weight: 400;
-        margin-top: 1rem;
+        margin-top: 0.5rem;
         margin-bottom: 0;
         letter-spacing: -0.01em;
     }
     
-    /* Card containers */
+    /* Clean card containers */
     .analysis-card {
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
         padding: 2rem;
         margin: 1.5rem 0;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-        backdrop-filter: blur(20px);
-        transition: all 0.3s ease;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        transition: all 0.2s ease;
     }
     
     .analysis-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.5);
     }
     
-    /* Tabs styling */
+    /* Clean tabs styling */
     .stTabs [data-baseweb="tab-list"] {
         background: rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
-        padding: 0.5rem;
-        gap: 0.5rem;
-        border: none;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        padding: 0.25rem;
+        gap: 0.25rem;
         margin-bottom: 2rem;
-        backdrop-filter: blur(20px);
     }
     
     .stTabs [data-baseweb="tab"] {
-        height: 60px;
-        border-radius: 12px;
+        height: 48px;
+        border-radius: 6px;
         color: rgba(255, 255, 255, 0.7);
         font-weight: 500;
-        font-size: 1.1rem;
-        padding: 0 2rem;
-        transition: all 0.3s ease;
+        font-size: 0.95rem;
+        padding: 0 1.5rem;
+        transition: all 0.2s ease;
         border: none;
         background: transparent;
     }
     
     .stTabs [aria-selected="true"] {
         background: rgba(255, 255, 255, 0.2);
-        color: white;
-        box-shadow: 0 4px 20px rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(20px);
+        color: #ffffff;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
     
-    /* Button styling */
+    /* Clean button styling */
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         border: none;
-        border-radius: 16px;
-        padding: 0.8rem 2rem;
-        font-weight: 600;
-        font-size: 1rem;
+        border-radius: 6px;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        font-size: 0.95rem;
         letter-spacing: -0.01em;
-        transition: all 0.3s ease;
-        box-shadow: 0 8px 24px rgba(102, 126, 234, 0.3);
-        height: 50px;
+        transition: all 0.2s ease;
+        height: 44px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 4px 15px 0 rgba(31, 38, 135, 0.4);
     }
     
     .stButton > button:hover {
+        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
         transform: translateY(-2px);
-        box-shadow: 0 12px 32px rgba(102, 126, 234, 0.4);
-        background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+        box-shadow: 0 8px 25px 0 rgba(31, 38, 135, 0.6);
     }
     
     .stButton > button:active {
         transform: translateY(0);
-        box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
     }
     
-    /* Input styling */
+    /* Primary button variant */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+    }
+    
+    /* Clean input styling */
     .stFileUploader {
-        background: white;
-        border-radius: 16px;
-        padding: 1.5rem;
-        border: 2px dashed #e1e5e9;
-        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 2px dashed rgba(255, 255, 255, 0.3);
+        border-radius: 8px;
+        padding: 2rem;
+        transition: all 0.2s ease;
+        text-align: center;
     }
     
     .stFileUploader:hover {
-        border-color: #667eea;
-        background: #f8f9ff;
+        border-color: rgba(255, 255, 255, 0.5);
+        background: rgba(255, 255, 255, 0.15);
     }
     
     .stTextArea textarea {
-        border-radius: 16px;
-        border: 2px solid #e1e5e9;
-        background: white;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
         font-family: 'Inter', sans-serif;
-        transition: all 0.3s ease;
-        padding: 1rem;
-        font-size: 15px;
+        transition: all 0.2s ease;
+        padding: 0.75rem;
+        font-size: 0.95rem;
         resize: vertical;
+        color: #ffffff;
     }
     
     .stTextArea textarea:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        border-color: rgba(255, 255, 255, 0.6);
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
         outline: none;
+        background: rgba(255, 255, 255, 0.15);
     }
     
     .stSelectbox select {
-        border-radius: 16px;
-        border: 2px solid #e1e5e9;
-        background: white;
+        border-radius: 6px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
         font-family: 'Inter', sans-serif;
-        padding: 0.8rem 1rem;
-        font-size: 15px;
-        transition: all 0.3s ease;
+        padding: 0.75rem;
+        font-size: 0.95rem;
+        transition: all 0.2s ease;
+        color: #ffffff;
     }
     
     .stSelectbox select:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        border-color: rgba(255, 255, 255, 0.6);
+        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
         outline: none;
+        background: rgba(255, 255, 255, 0.15);
     }
     
-    /* Metrics cards */
-    .metric-card {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 249, 255, 0.95) 100%);
-        border-radius: 16px;
-        padding: 1.5rem;
-        text-align: center;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-        transition: all 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
-    }
-    
+    /* Clean metrics cards */
     [data-testid="metric-container"] {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 249, 255, 0.95) 100%);
-        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
         padding: 1.5rem;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-        transition: all 0.3s ease;
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        transition: all 0.2s ease;
     }
     
     [data-testid="metric-container"]:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.5);
     }
     
-    /* Results sections */
+    [data-testid="metric-container"] > div {
+        color: #ffffff;
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-value"] {
+        color: #ffffff;
+        font-size: 1.5rem;
+        font-weight: 600;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    }
+    
+    [data-testid="metric-container"] [data-testid="metric-label"] {
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    
+    /* Clean results sections */
     .results-container {
-        background: white;
-        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
         padding: 2rem;
         margin: 1.5rem 0;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-        border: 1px solid rgba(0, 0, 0, 0.05);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
     }
     
-    /* Section headers */
+    /* Clean section headers */
     h1, h2, h3 {
-        color: #2d3748;
+        color: #ffffff;
         font-weight: 600;
         letter-spacing: -0.01em;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
     }
     
     h3 {
-        color: #4a5568;
-        border-bottom: 2px solid #e2e8f0;
+        color: #ffffff;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
         padding-bottom: 0.5rem;
         margin-bottom: 1.5rem;
+        font-size: 1.25rem;
     }
     
-    /* Info messages */
+    h4 {
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 500;
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+    }
+    
+    /* Clean alert messages */
     .stInfo {
-        background: linear-gradient(135deg, #e6f3ff 0%, #f0f8ff 100%);
-        border: none;
-        border-left: 4px solid #667eea;
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
+        background: rgba(59, 130, 246, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(59, 130, 246, 0.3);
+        border-left: 4px solid #3b82f6;
+        border-radius: 6px;
+        padding: 1rem;
+        color: rgba(255, 255, 255, 0.9);
     }
     
     .stSuccess {
-        background: linear-gradient(135deg, #f0fff4 0%, #f7fffa 100%);
-        border: none;
-        border-left: 4px solid #48bb78;
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
+        background: rgba(34, 197, 94, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(34, 197, 94, 0.3);
+        border-left: 4px solid #22c55e;
+        border-radius: 6px;
+        padding: 1rem;
+        color: rgba(255, 255, 255, 0.9);
     }
     
     .stError {
-        background: linear-gradient(135deg, #fff5f5 0%, #fffafa 100%);
-        border: none;
-        border-left: 4px solid #f56565;
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
+        background: rgba(239, 68, 68, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-left: 4px solid #ef4444;
+        border-radius: 6px;
+        padding: 1rem;
+        color: rgba(255, 255, 255, 0.9);
     }
     
     .stWarning {
-        background: linear-gradient(135deg, #fffbf0 0%, #fffef5 100%);
-        border: none;
-        border-left: 4px solid #ed8936;
-        border-radius: 12px;
-        padding: 1rem 1.5rem;
+        background: rgba(245, 158, 11, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-left: 4px solid #f59e0b;
+        border-radius: 6px;
+        padding: 1rem;
+        color: rgba(255, 255, 255, 0.9);
     }
     
-    /* Hide Streamlit default elements */
+    /* Hide Streamlit elements */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stDeployButton {display: none;}
     
-    /* Expander styling */
+    /* Clean expander styling */
     .streamlit-expanderHeader {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 249, 255, 0.95) 100%);
-        border-radius: 12px;
-        border: 1px solid rgba(0, 0, 0, 0.05);
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
         padding: 1rem;
-        font-weight: 600;
+        font-weight: 500;
+        color: #ffffff;
     }
     
     .streamlit-expanderContent {
-        background: white;
-        border-radius: 0 0 12px 12px;
-        border: 1px solid rgba(0, 0, 0, 0.05);
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 0 0 6px 6px;
         border-top: none;
         padding: 1.5rem;
+    }
+    
+    /* Clean download button */
+    .stDownloadButton > button {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 0.75rem 1.5rem;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        font-size: 0.95rem;
+        box-shadow: 0 4px 15px 0 rgba(5, 150, 105, 0.4);
+    }
+    
+    .stDownloadButton > button:hover {
+        background: linear-gradient(135deg, #047857 0%, #065f46 100%);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px 0 rgba(5, 150, 105, 0.6);
+    }
+    
+    /* Section headers */
+    .section-header {
+        margin: 2rem 0 1rem 0;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    .section-header h4 {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin: 0;
     }
     
     /* Responsive design */
     @media (max-width: 768px) {
         .main-title {
-            font-size: 2.5rem;
+            font-size: 2rem;
         }
         
         .subtitle {
-            font-size: 1.1rem;
+            font-size: 1rem;
         }
         
         .header-container {
@@ -394,32 +472,14 @@ st.markdown("""
         }
         
         .block-container {
-            padding: 0.5rem 1rem;
+            padding: 1rem 1.5rem;
         }
     }
     
-    /* Loading spinner customization */
+    /* Loading spinner */
     .stSpinner {
         text-align: center;
-        color: #667eea;
-    }
-    
-    /* Download button styling */
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-        color: white;
-        border: none;
-        border-radius: 16px;
-        padding: 0.8rem 2rem;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        box-shadow: 0 8px 24px rgba(72, 187, 120, 0.3);
-    }
-    
-    .stDownloadButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 12px 32px rgba(72, 187, 120, 0.4);
-        background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
+        color: #ffffff;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -980,7 +1040,7 @@ def main():
 
 def show_main_page():
     """Display the main application page"""
-    # Enhanced header with glassmorphism effect
+    # Clean, minimalist header
     st.markdown(f'''
     <div class="header-container">
         <h1 class="main-title">{APP_TITLE}</h1>
@@ -996,14 +1056,14 @@ def show_main_page():
         st.session_state.analysis_history = []
     
     # Create tabs for different functionalities
-    tab1, tab2 = st.tabs(["🔬 Clinical Analysis", "🧬 Disease Prediction"])
+    tab1, tab2 = st.tabs(["Clinical Analysis", "Disease Prediction"])
     
     with tab1:
-        # Clinical Analysis Section with card layout
+        # Clinical Analysis Section with clean layout
         st.markdown('''
         <div class="analysis-card">
-            <h3>📄 Clinical Document Analysis</h3>
-            <p style="color: #6b7280; margin-bottom: 1.5rem;">Upload medical documents for comprehensive AI-powered analysis and insights.</p>
+            <h3>Clinical Document Analysis</h3>
+            <p style="color: #64748b; margin-bottom: 1.5rem;">Upload medical documents for comprehensive AI-powered analysis and insights.</p>
         </div>
         ''', unsafe_allow_html=True)
         
@@ -1020,18 +1080,19 @@ def show_main_page():
         if uploaded_file is not None:
             st.session_state.uploaded_file = uploaded_file
             
-            # Show file info in a nice format
+            # Show file info in a clean format
             st.markdown(f'''
             <div class="analysis-card">
                 <div style="display: flex; align-items: center; gap: 1rem;">
-                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    <div style="background: #3b82f6; 
                                 color: white; 
-                                padding: 0.5rem; 
-                                border-radius: 8px; 
-                                font-size: 1.2rem;">📄</div>
+                                padding: 0.75rem; 
+                                border-radius: 6px; 
+                                font-weight: 600;
+                                font-size: 0.875rem;">PDF</div>
                     <div>
-                        <h4 style="margin: 0; color: #374151;">{uploaded_file.name}</h4>
-                        <p style="margin: 0; color: #6b7280; font-size: 0.9rem;">
+                        <h4 style="margin: 0; color: #1e293b;">{uploaded_file.name}</h4>
+                        <p style="margin: 0; color: #64748b; font-size: 0.875rem;">
                             {uploaded_file.size / 1024:.1f} KB • PDF Document
                         </p>
                     </div>
@@ -1039,10 +1100,10 @@ def show_main_page():
             </div>
             ''', unsafe_allow_html=True)
             
-            # Analyze button with better spacing
+            # Analyze button with clean styling
             col1, col2, col3 = st.columns([1, 1, 1])
             with col2:
-                if st.button("🚀 Analyze Document", type="primary", use_container_width=True):
+                if st.button("Analyze Document", type="primary", use_container_width=True):
                     # Update status
                     st.session_state.analysis_status = "Extracting text..."
                 
@@ -1092,27 +1153,27 @@ def show_main_page():
             metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
             with metric_col1:
                 confidence = results.get('confidence_score', 0)
-                st.metric("🎯 Confidence", f"{confidence:.0%}")
+                st.metric("Confidence", f"{confidence:.0%}")
             with metric_col2:
                 total_findings = len(results.get('key_findings', [])) + len(results.get('risk_factors', [])) + len(results.get('critical_alerts', []))
-                st.metric("📊 Total Findings", total_findings)
+                st.metric("Total Findings", total_findings)
             with metric_col3:
                 data_quality = results.get('data_quality', 'Unknown')
-                st.metric("🔍 Data Quality", data_quality.title())
+                st.metric("Data Quality", data_quality.title())
             with metric_col4:
                 critical_alerts = len(results.get('critical_alerts', []))
-                st.metric("⚠️ Critical Alerts", critical_alerts)
+                st.metric("Critical Alerts", critical_alerts)
             
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Results display with better organization
-            st.markdown("### 📋 Clinical Analysis Results")
+            # Results display with clean organization
+            st.markdown("### Clinical Analysis Results")
             
             # Summary section
             if results.get('summary'):
                 st.markdown('''
                 <div class="analysis-card">
-                    <h4 style="color: #374151; margin-bottom: 1rem;">📝 Executive Summary</h4>
+                    <h4 style="color: #1e293b; margin-bottom: 1rem;">Executive Summary</h4>
                 </div>
                 ''', unsafe_allow_html=True)
                 st.info(results["summary"])
@@ -1125,7 +1186,7 @@ def show_main_page():
                 if results.get('key_findings'):
                     st.markdown('''
                     <div class="analysis-card">
-                        <h4 style="color: #374151; margin-bottom: 1rem;">🔍 Key Medical Findings</h4>
+                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Key Medical Findings</h4>
                     </div>
                     ''', unsafe_allow_html=True)
                     
@@ -1136,7 +1197,7 @@ def show_main_page():
                 if results.get('medical_terms'):
                     st.markdown('''
                     <div class="analysis-card" style="margin-top: 1.5rem;">
-                        <h4 style="color: #374151; margin-bottom: 1rem;">🏥 Medical Terminology</h4>
+                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Medical Terminology</h4>
                     </div>
                     ''', unsafe_allow_html=True)
                     
@@ -1150,14 +1211,14 @@ def show_main_page():
                 if results.get('risk_factors') or results.get('critical_alerts'):
                     st.markdown('''
                     <div class="analysis-card">
-                        <h4 style="color: #374151; margin-bottom: 1rem;">⚠️ Risk Assessment</h4>
+                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Risk Assessment</h4>
                     </div>
                     ''', unsafe_allow_html=True)
                     
                     # Critical alerts first
                     if results.get('critical_alerts'):
                         for alert in results['critical_alerts'][:3]:
-                            st.error(f"🚨 **CRITICAL:** {alert}")
+                            st.error(f"**CRITICAL:** {alert}")
                     
                     # Risk factors
                     if results.get('risk_factors'):
@@ -1168,19 +1229,19 @@ def show_main_page():
                 if results.get('recommendations'):
                     st.markdown('''
                     <div class="analysis-card" style="margin-top: 1.5rem;">
-                        <h4 style="color: #374151; margin-bottom: 1rem;">💡 Medical Recommendations</h4>
+                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Medical Recommendations</h4>
                     </div>
                     ''', unsafe_allow_html=True)
                     
                     for i, rec in enumerate(results['recommendations'][:5], 1):
                         st.success(f"**{i}.** {rec}")
             
-            # Export section with enhanced styling
+            # Export section with clean styling
             st.markdown("---")
             st.markdown('''
             <div class="analysis-card">
-                <h4 style="color: #374151; margin-bottom: 1rem;">📤 Export Results</h4>
-                <p style="color: #6b7280; margin-bottom: 1.5rem;">Download your analysis results in PDF format for sharing with healthcare providers.</p>
+                <h4 style="color: #1e293b; margin-bottom: 1rem;">Export Results</h4>
+                <p style="color: #64748b; margin-bottom: 1.5rem;">Download your analysis results in PDF format for sharing with healthcare providers.</p>
             </div>
             ''', unsafe_allow_html=True)
             
@@ -1197,7 +1258,7 @@ def show_main_page():
                 
                 if pdf_content:
                     st.download_button(
-                        label="📄 Download Clinical Analysis PDF",
+                        label="Download Clinical Analysis PDF",
                         data=pdf_content,
                         file_name=filename,
                         mime="application/pdf"
@@ -1205,11 +1266,11 @@ def show_main_page():
                 else:
                     st.error("Failed to generate PDF report. Please try again.")
             
-            # Reset button at the end - only show when analysis is performed
+            # Reset button - clean styling
             if st.session_state.analysis_results:
                 st.markdown("---")
                 st.markdown("### Reset Analysis")
-                if st.button("🔄 Reset Analysis", help="Clear analysis and delete files", use_container_width=True):
+                if st.button("Reset Analysis", help="Clear analysis and delete files", use_container_width=True):
                     st.session_state.analysis_results = None
                     st.session_state.uploaded_file = None
                     st.session_state.processed_text = None
@@ -1436,21 +1497,21 @@ def show_main_page():
                     st.success("Reset completed! Prediction cleared and files deleted.")
                     st.rerun()
     
-    # Configuration button at the bottom left
+    # Configuration button at the bottom
     st.markdown("---")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col1:
-        if st.button("⚙️ Configuration", help="Manage diseases and file types", use_container_width=True):
+        if st.button("Configuration", help="Manage diseases and file types", use_container_width=True):
             st.session_state.current_page = 'config'
             st.rerun()
 
 
 def show_configuration_page():
-    """Display the configuration page with enhanced styling"""
-    # Enhanced header with gradient
+    """Display the configuration page with clean styling"""
+    # Clean header
     st.markdown('''
-    <div class="main-header-container">
-        <h1 class="main-header">⚙️ System Configuration</h1>
+    <div class="header-container">
+        <h1 class="main-title">System Configuration</h1>
         <p class="subtitle">Manage disease types, file formats, and AI model settings</p>
     </div>
     ''', unsafe_allow_html=True)
@@ -1465,13 +1526,13 @@ def show_configuration_page():
     # Configuration tabs with modern styling
     st.markdown("##")
     
-    create_tab, edit_tab, manage_tab = st.tabs(["➕ Create Disease", "✏️ Edit Diseases", "⚙️ Import/Export"])
+    create_tab, edit_tab, manage_tab = st.tabs(["Create Disease", "Edit Diseases", "Import/Export"])
     
     with create_tab:
         st.markdown('''
         <div class="analysis-card">
-            <h3 style="color: #374151; margin-bottom: 1rem;">🆕 Add New Disease Configuration</h3>
-            <p style="color: #6b7280; margin-bottom: 2rem;">
+            <h3 style="color: #1e293b; margin-bottom: 1rem;">Add New Disease Configuration</h3>
+            <p style="color: #64748b; margin-bottom: 2rem;">
                 Create a new disease profile with customized file type support and analysis parameters.
             </p>
         </div>
@@ -1480,7 +1541,7 @@ def show_configuration_page():
         # Disease information section
         st.markdown('''
         <div class="section-header">
-            <h4>📋 Disease Information</h4>
+            <h4>Disease Information</h4>
         </div>
         ''', unsafe_allow_html=True)
         
