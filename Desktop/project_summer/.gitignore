@@ -50,3 +50,7 @@ Thumbs.db
 *.log
 temp/
 tmp/
+
+# Future implementations and documentation
+future_implementations/
+FUTURE_WORK.md

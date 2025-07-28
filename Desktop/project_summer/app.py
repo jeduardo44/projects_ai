@@ -17,8 +17,6 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 # LangChain imports
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
-from langchain.output_parsers import PydanticOutputParser
-from pydantic import BaseModel, Field
 from typing import List
 import logging
 
@@ -32,29 +30,15 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Pydantic models for structured output
-class MedicalAnalysis(BaseModel):
-    """Structured output for medical document analysis"""
-    summary: str = Field(description="Brief summary of the medical data")
-    key_findings: List[str] = Field(description="List of key medical findings")
-    risk_factors: List[str] = Field(description="List of identified risk factors")
-    recommendations: List[str] = Field(description="List of medical recommendations")
-    medical_terms: List[str] = Field(description="List of important medical terminology")
-    confidence_score: float = Field(description="Confidence score between 0 and 1")
-    critical_alerts: List[str] = Field(description="List of critical medical alerts")
-    data_quality: str = Field(description="Assessment of data quality: good/medium/poor")
-
-class DiseaseAnalysis(BaseModel):
-    """Structured output for disease-specific analysis"""
-    disease: str = Field(description="The disease being analyzed")
-    symptoms_analyzed: List[str] = Field(description="List of symptoms that were analyzed")
-    likelihood: str = Field(description="Likelihood assessment: high/medium/low")
-    confidence_score: float = Field(description="Confidence score between 0 and 1")
-    key_indicators: List[str] = Field(description="Key indicators for the disease")
-    differential_diagnosis: List[str] = Field(description="List of differential diagnoses")
-    recommendations: List[str] = Field(description="Medical recommendations")
-    urgency_level: str = Field(description="Urgency level: high/medium/low")
-    next_steps: List[str] = Field(description="Recommended next steps")
+# Import model functions from src
+from src.models import (
+    create_medical_analysis_template, 
+    create_disease_analysis_template,
+    validate_medical_analysis,
+    validate_disease_analysis,
+    create_medical_analysis,
+    create_disease_analysis
+)
 
 # Initialize LangChain components
 def initialize_langchain():
@@ -67,14 +51,75 @@ def initialize_langchain():
             api_key=OPENAI_API_KEY
         )
         
-        # Initialize output parsers
-        medical_parser = PydanticOutputParser(pydantic_object=MedicalAnalysis)
-        disease_parser = PydanticOutputParser(pydantic_object=DiseaseAnalysis)
-        
-        return llm, medical_parser, disease_parser
+        # Create template functions for structured output instead of Pydantic parsers
+        return llm, None, None  # We'll handle parsing manually
     except Exception as e:
         logger.error(f"Error initializing LangChain: {e}")
         return None, None, None
+
+def parse_medical_analysis_response(response_text: str) -> dict:
+    """Parse LLM response into medical analysis structure"""
+    try:
+        # Try to parse as JSON first
+        import json
+        import re
+        
+        # Look for JSON in the response
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                # Validate and fill template
+                template = create_medical_analysis_template()
+                for key in template.keys():
+                    if key in parsed:
+                        template[key] = parsed[key]
+                return template
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: manual parsing
+        template = create_medical_analysis_template()
+        template['summary'] = response_text[:500]  # First 500 chars as summary
+        template['confidence_score'] = 0.8  # Default confidence
+        template['data_quality'] = 'medium'
+        
+        return template
+    except Exception as e:
+        logger.error(f"Error parsing medical analysis response: {e}")
+        return create_medical_analysis_template()
+
+def parse_disease_analysis_response(response_text: str) -> dict:
+    """Parse LLM response into disease analysis structure"""
+    try:
+        # Try to parse as JSON first
+        import json
+        import re
+        
+        # Look for JSON in the response
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                # Validate and fill template
+                template = create_disease_analysis_template()
+                for key in template.keys():
+                    if key in parsed:
+                        template[key] = parsed[key]
+                return template
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: manual parsing
+        template = create_disease_analysis_template()
+        template['confidence_score'] = 0.8  # Default confidence
+        template['likelihood'] = 'medium'
+        template['urgency_level'] = 'medium'
+        
+        return template
+    except Exception as e:
+        logger.error(f"Error parsing disease analysis response: {e}")
+        return create_disease_analysis_template()
 
 # Page configuration with clean design
 st.set_page_config(
@@ -519,9 +564,9 @@ def extract_text_from_pdf(pdf_file):
 def analyze_medical_data(text):
     """Analyze medical data using LangChain and OpenAI"""
     try:
-        llm, medical_parser, _ = initialize_langchain()
-        if not llm or not medical_parser:
-            st.error("Failed to initialize LangChain components")
+        llm, _, _ = initialize_langchain()
+        if not llm:
+            st.error("Failed to initialize analysis components")
             return None
         
         # Create structured prompt template
@@ -536,16 +581,24 @@ def analyze_medical_data(text):
         5. Assessing data quality and completeness
         6. Maintaining clinical accuracy and medical standards
         
-        Always prioritize patient safety and clinical relevance in your analysis."""
+        Always prioritize patient safety and clinical relevance in your analysis.
+        
+        Please respond with a JSON object containing:
+        - summary: Brief summary of the medical data
+        - key_findings: List of key medical findings
+        - risk_factors: List of identified risk factors
+        - recommendations: List of medical recommendations
+        - medical_terms: List of important medical terminology
+        - confidence_score: Confidence score between 0 and 1
+        - critical_alerts: List of critical medical alerts
+        - data_quality: Assessment of data quality (good/medium/poor)"""
         
         human_template = """Analyze the following medical text and provide a comprehensive analysis:
 
 Medical Text:
 {text}
 
-{format_instructions}
-
-Please provide a thorough analysis that would be useful for healthcare professionals."""
+Please provide a thorough analysis as a JSON object that would be useful for healthcare professionals."""
         
         # Create prompt template
         prompt = ChatPromptTemplate.from_messages([
@@ -553,33 +606,32 @@ Please provide a thorough analysis that would be useful for healthcare professio
             ("human", human_template)
         ])
         
-        # Format the prompt with instructions
+        # Format the prompt
         formatted_prompt = prompt.format_messages(
-            text=text[:OPENAI_MAX_TOKENS],
-            format_instructions=medical_parser.get_format_instructions()
+            text=text[:OPENAI_MAX_TOKENS]
         )
         
         # Get response from LangChain
         response = llm.invoke(formatted_prompt)
         
-        # Parse the structured response
+        # Parse the structured response using our custom parser
         try:
-            parsed_result = medical_parser.parse(response.content)
-            return parsed_result.model_dump()
+            parsed_result = parse_medical_analysis_response(response.content)
+            return parsed_result
         except Exception as parse_error:
-            logger.error(f"Error parsing LangChain response: {parse_error}")
+            logger.error(f"Error parsing analysis response: {parse_error}")
             st.error("Error parsing analysis results. Please try again.")
             return None
             
     except Exception as e:
-        logger.error(f"Error during LangChain analysis: {e}")
+        logger.error(f"Error during medical analysis: {e}")
         st.error(f"Error during analysis: {str(e)}")
         return None
 
-def run_ml_prediction(disease, file_data, images_data, video_data, symptoms_text):
-    """Run ML prediction for a specific disease"""
+def run_disease_prediction(disease, file_data, images_data, video_data, symptoms_text):
+    """Run statistical prediction for a specific disease"""
     try:
-        # Simulate ML model prediction (replace with actual ML models)
+        # Simulate statistical model prediction (replace with actual models)
         import random
         
         # Extract features from file, images, video, and symptoms
@@ -1386,7 +1438,7 @@ def show_main_page():
                     
                     with st.spinner(f"Running ML prediction for {selected_disease}..."):
                         # Simulate ML prediction (replace with actual ML model)
-                        prediction_results = run_ml_prediction(selected_disease, disease_file, disease_images, disease_video, symptoms_input)
+                        prediction_results = run_disease_prediction(selected_disease, disease_file, disease_images, disease_video, symptoms_input)
                         if prediction_results:
                             st.session_state.prediction_results = prediction_results
                             st.session_state.analysis_status = "Completed"
