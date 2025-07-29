@@ -1,8 +1,8 @@
-# Demo Screenshots for LinkedIn
+# Demo Screenshots
 
-This folder should contain professional screenshots of your Medical Data Analyzer application:
+This folder contains screenshots of the Medical Data Analyzer application for documentation and demonstration purposes.
 
-## Required Screenshots for LinkedIn Post:
+## Required Screenshots:
 
 ### 1. **main_interface.png**
 - Full homepage with glassmorphism design
@@ -40,14 +40,6 @@ This folder should contain professional screenshots of your Medical Data Analyze
 4. **Ensure good lighting and contrast**
 5. **Include sample data for demonstration**
 
-## LinkedIn Post Format:
-
-Use these screenshots in a carousel post with:
-- **Slide 1:** Main interface + title overlay
-- **Slide 2:** Analysis results + key features
-- **Slide 3:** Disease prediction + ML accuracy
-- **Slide 4:** Technical stack + GitHub link
-
 ---
 
-**Note:** Replace this README with actual screenshots before publishing on LinkedIn.
+**Note:** These screenshots can be used for documentation, presentations, or project showcases.
