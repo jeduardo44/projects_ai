@@ -1,8 +1,0 @@
-transformers
-datasets
-torch
-sentencepiece
-accelerate
-fastapi
-uvicorn
-bitsandbytes
