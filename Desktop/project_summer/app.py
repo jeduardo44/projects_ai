@@ -1,2001 +1,625 @@
+"""
+Medical AI Analyzer - Streamlined Streamlit Application
+A clean, Pythonic medical document analysis and disease prediction app.
+"""
+
 import streamlit as st
 import os
-from dotenv import load_dotenv
 import tempfile
-import pypdf
 import json
-import random
-import time
-from datetime import datetime
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-
-# LangChain imports
-from langchain_openai import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
-from typing import List
 import logging
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from dataclasses import dataclass
 
-# Import constants
+# Third-party imports
+import pypdf
+import pandas as pd
+import numpy as np
+from dotenv import load_dotenv
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+
+# Local imports
 from constants import *
-
-# Load environment variables
-load_dotenv()
+from disease_config import disease_manager, DiseaseConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import model functions from src
-from src.models import (
-    create_medical_analysis_template, 
-    create_disease_analysis_template,
-    validate_medical_analysis,
-    validate_disease_analysis,
-    create_medical_analysis,
-    create_disease_analysis
-)
+# Load environment variables
+load_dotenv()
 
-# Import real ML models for disease prediction
-try:
-    from ml_models import (
-        predict_diabetes,
-        generate_diabetes_recommendations,
-        create_sample_patient_data,
-        test_diabetes_prediction
-    )
-    ML_MODELS_AVAILABLE = True
-    logger.info("Real ML models imported successfully")
-except ImportError as e:
-    logger.warning(f"Real ML models not available: {e}")
-    ML_MODELS_AVAILABLE = False
 
-# Initialize LangChain components
-def initialize_langchain():
-    """Initialize LangChain components"""
-    try:
-        # Initialize OpenAI LLM
-        llm = ChatOpenAI(
-            model=OPENAI_MODEL,
-            temperature=OPENAI_TEMPERATURE,
-            api_key=OPENAI_API_KEY
+@dataclass
+class AnalysisResult:
+    """Data class for analysis results."""
+    summary: str
+    key_findings: List[str]
+    risk_factors: List[str]
+    recommendations: List[str]
+    confidence_score: float
+    timestamp: datetime
+
+
+@dataclass
+class PatientData:
+    """Data class for patient information."""
+    age: int
+    bmi: float
+    glucose_level: int
+    blood_pressure: int
+    insulin_level: int
+    family_history: bool
+    physical_activity: int  # 1-5 scale
+    diet_score: int  # 1-5 scale
+    stress_level: int  # 1-5 scale
+
+
+class MedicalAnalyzer:
+    """Core medical analysis functionality."""
+    
+    def __init__(self):
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.llm = self._initialize_llm()
+        self.ml_models = self._load_ml_models()
+    
+    def _initialize_llm(self) -> Optional[object]:
+        """Initialize OpenAI LLM if API key is available."""
+        if not self.api_key or self.api_key == "your_openai_api_key_here":
+            logger.warning("OpenAI API key not configured")
+            return None
+        
+        try:
+            from langchain_openai import ChatOpenAI
+            return ChatOpenAI(
+                model=OPENAI_MODEL,
+                temperature=OPENAI_TEMPERATURE,
+                api_key=self.api_key
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM: {e}")
+            return None
+    
+    def _load_ml_models(self) -> bool:
+        """Load ML models for disease prediction."""
+        try:
+            from ml_models import predict_diabetes, generate_diabetes_recommendations
+            self.predict_diabetes = predict_diabetes
+            self.generate_recommendations = generate_diabetes_recommendations
+            return True
+        except ImportError as e:
+            logger.error(f"ML models not available: {e}")
+            return False
+    
+    def extract_text_from_pdf(self, pdf_file) -> str:
+        """Extract text from uploaded PDF file."""
+        try:
+            pdf_reader = pypdf.PdfReader(pdf_file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            return text.strip()
+        except Exception as e:
+            logger.error(f"Error extracting PDF text: {e}")
+            return ""
+    
+    def analyze_medical_document(self, text: str) -> AnalysisResult:
+        """Analyze medical document text using AI."""
+        if not self.llm:
+            return self._create_fallback_analysis(text)
+        
+        try:
+            prompt = f"""
+            Analyze the following medical document and provide:
+            1. A concise summary (2-3 sentences)
+            2. Key medical findings (list)
+            3. Risk factors identified (list)
+            4. Recommendations (list)
+            5. Confidence score (0.0-1.0)
+            
+            Medical Document:
+            {text[:2000]}  # Limit text length
+            
+            Please respond in JSON format.
+            """
+            
+            response = self.llm.invoke(prompt)
+            return self._parse_analysis_response(response.content)
+        
+        except Exception as e:
+            logger.error(f"Error in document analysis: {e}")
+            return self._create_fallback_analysis(text)
+    
+    def _parse_analysis_response(self, response: str) -> AnalysisResult:
+        """Parse LLM response into AnalysisResult."""
+        try:
+            # Try to extract JSON from response
+            import re
+            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+                return AnalysisResult(
+                    summary=data.get('summary', 'Analysis completed'),
+                    key_findings=data.get('key_findings', []),
+                    risk_factors=data.get('risk_factors', []),
+                    recommendations=data.get('recommendations', []),
+                    confidence_score=data.get('confidence_score', 0.8),
+                    timestamp=datetime.now()
+                )
+        except Exception as e:
+            logger.error(f"Error parsing analysis response: {e}")
+        
+        return self._create_fallback_analysis(response)
+    
+    def _create_fallback_analysis(self, text: str) -> AnalysisResult:
+        """Create fallback analysis when LLM is not available."""
+        return AnalysisResult(
+            summary=f"Document processed. Content length: {len(text)} characters.",
+            key_findings=["Document text extracted successfully"],
+            risk_factors=["Manual review recommended"],
+            recommendations=["Please review document manually", "Consider consulting medical professional"],
+            confidence_score=0.5,
+            timestamp=datetime.now()
         )
+    
+    def predict_disease_risk(self, patient_data: PatientData) -> Dict:
+        """Predict disease risk using ML models."""
+        if not self.ml_models:
+            return self._create_fallback_prediction(patient_data)
         
-        # Create template functions for structured output instead of Pydantic parsers
-        return llm, None, None  # We'll handle parsing manually
-    except Exception as e:
-        logger.error(f"Error initializing LangChain: {e}")
-        return None, None, None
+        try:
+            # Convert to format expected by ML model
+            data_dict = {
+                'age': patient_data.age,
+                'bmi': patient_data.bmi,
+                'glucose_level': patient_data.glucose_level,
+                'blood_pressure': patient_data.blood_pressure,
+                'insulin_level': patient_data.insulin_level,
+                'family_history': int(patient_data.family_history),
+                'physical_activity': patient_data.physical_activity,
+                'diet_score': patient_data.diet_score,
+                'stress_level': patient_data.stress_level
+            }
+            
+            prediction_result = self.predict_diabetes(data_dict)
+            recommendations = self.generate_recommendations(prediction_result, data_dict)
+            
+            return {
+                'prediction': prediction_result.get('prediction', 'Unknown'),
+                'risk_score': prediction_result.get('risk_score', 0.0),
+                'confidence': prediction_result.get('confidence', 0.0),
+                'recommendations': recommendations
+            }
+        
+        except Exception as e:
+            logger.error(f"Error in disease prediction: {e}")
+            return self._create_fallback_prediction(patient_data)
+    
+    def _create_fallback_prediction(self, patient_data: PatientData) -> Dict:
+        """Create fallback prediction when ML models are not available."""
+        # Simple rule-based prediction
+        risk_score = 0.0
+        if patient_data.age > 45:
+            risk_score += 0.2
+        if patient_data.bmi > 25:
+            risk_score += 0.3
+        if patient_data.glucose_level > 126:
+            risk_score += 0.4
+        if patient_data.family_history:
+            risk_score += 0.1
+        
+        risk_level = "Low" if risk_score < 0.3 else "Medium" if risk_score < 0.7 else "High"
+        
+        return {
+            'prediction': f"{risk_level} Risk",
+            'risk_score': min(risk_score, 1.0),
+            'confidence': 0.6,
+            'recommendations': [
+                "Maintain healthy diet",
+                "Regular exercise recommended",
+                "Monitor blood glucose levels",
+                "Consult healthcare provider"
+            ]
+        }
 
-def parse_medical_analysis_response(response_text: str) -> dict:
-    """Parse LLM response into medical analysis structure"""
-    try:
-        # Try to parse as JSON first
-        import json
-        import re
-        
-        # Look for JSON in the response
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                # Validate and fill template
-                template = create_medical_analysis_template()
-                for key in template.keys():
-                    if key in parsed:
-                        template[key] = parsed[key]
-                return template
-            except json.JSONDecodeError:
-                pass
-        
-        # Fallback: manual parsing
-        template = create_medical_analysis_template()
-        template['summary'] = response_text[:500]  # First 500 chars as summary
-        template['confidence_score'] = 0.8  # Default confidence
-        template['data_quality'] = 'medium'
-        
-        return template
-    except Exception as e:
-        logger.error(f"Error parsing medical analysis response: {e}")
-        return create_medical_analysis_template()
 
-def parse_disease_analysis_response(response_text: str) -> dict:
-    """Parse LLM response into disease analysis structure"""
-    try:
-        # Try to parse as JSON first
-        import json
-        import re
+class ReportGenerator:
+    """Generate PDF reports for analysis results."""
+    
+    @staticmethod
+    def create_pdf_report(analysis: AnalysisResult, filename: str = "medical_analysis_report.pdf") -> bytes:
+        """Generate PDF report from analysis results."""
+        try:
+            buffer = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+            doc = SimpleDocTemplate(buffer.name, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Title
+            title = Paragraph("Medical Analysis Report", styles['Title'])
+            story.append(title)
+            story.append(Spacer(1, 12))
+            
+            # Timestamp
+            timestamp = Paragraph(f"Generated: {analysis.timestamp.strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal'])
+            story.append(timestamp)
+            story.append(Spacer(1, 12))
+            
+            # Summary
+            story.append(Paragraph("Summary", styles['Heading2']))
+            story.append(Paragraph(analysis.summary, styles['Normal']))
+            story.append(Spacer(1, 12))
+            
+            # Key Findings
+            if analysis.key_findings:
+                story.append(Paragraph("Key Findings", styles['Heading2']))
+                for finding in analysis.key_findings:
+                    story.append(Paragraph(f"• {finding}", styles['Normal']))
+                story.append(Spacer(1, 12))
+            
+            # Risk Factors
+            if analysis.risk_factors:
+                story.append(Paragraph("Risk Factors", styles['Heading2']))
+                for risk in analysis.risk_factors:
+                    story.append(Paragraph(f"• {risk}", styles['Normal']))
+                story.append(Spacer(1, 12))
+            
+            # Recommendations
+            if analysis.recommendations:
+                story.append(Paragraph("Recommendations", styles['Heading2']))
+                for rec in analysis.recommendations:
+                    story.append(Paragraph(f"• {rec}", styles['Normal']))
+                story.append(Spacer(1, 12))
+            
+            # Confidence Score
+            story.append(Paragraph(f"Confidence Score: {analysis.confidence_score:.2f}", styles['Normal']))
+            
+            doc.build(story)
+            
+            with open(buffer.name, 'rb') as f:
+                pdf_content = f.read()
+            
+            os.unlink(buffer.name)
+            return pdf_content
         
-        # Look for JSON in the response
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                parsed = json.loads(json_match.group())
-                # Validate and fill template
-                template = create_disease_analysis_template()
-                for key in template.keys():
-                    if key in parsed:
-                        template[key] = parsed[key]
-                return template
-            except json.JSONDecodeError:
-                pass
-        
-        # Fallback: manual parsing
-        template = create_disease_analysis_template()
-        template['confidence_score'] = 0.8  # Default confidence
-        template['likelihood'] = 'medium'
-        template['urgency_level'] = 'medium'
-        
-        return template
-    except Exception as e:
-        logger.error(f"Error parsing disease analysis response: {e}")
-        return create_disease_analysis_template()
+        except Exception as e:
+            logger.error(f"Error generating PDF report: {e}")
+            return b""
 
-# Page configuration with clean design
-st.set_page_config(
-    page_title="Medical AI Analyzer",
-    page_icon="⚕️",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
 
-# Clean minimalist CSS styling
-st.markdown("""
-<style>
-    /* Import clean fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
-    /* Global reset and base styles */
-    html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        margin: 0;
-        padding: 0;
-        color: #ffffff;
-        min-height: 100vh;
-    }
-    
-    /* Main container */
-    .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 0;
-        min-height: 100vh;
-    }
-    
-    .block-container {
-        padding: 2rem 3rem;
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-    
-    /* Clean header section */
-    .header-container {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 12px;
-        padding: 3rem 2rem;
-        margin: 2rem 0;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        text-align: center;
-    }
-    
-    .main-title {
-        font-size: 2.5rem;
-        font-weight: 600;
-        color: #ffffff;
-        margin: 0;
-        letter-spacing: -0.02em;
-        line-height: 1.2;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-    
-    .subtitle {
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 1.1rem;
-        font-weight: 400;
-        margin-top: 0.5rem;
-        margin-bottom: 0;
-        letter-spacing: -0.01em;
-    }
-    
-    /* Clean card containers */
-    .analysis-card {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 2rem;
-        margin: 1.5rem 0;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        transition: all 0.2s ease;
-    }
-    
-    .analysis-card:hover {
-        background: rgba(255, 255, 255, 0.15);
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.5);
-    }
-    
-    /* Clean tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 0.25rem;
-        gap: 0.25rem;
-        margin-bottom: 2rem;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 48px;
-        border-radius: 6px;
-        color: rgba(255, 255, 255, 0.7);
-        font-weight: 500;
-        font-size: 0.95rem;
-        padding: 0 1.5rem;
-        transition: all 0.2s ease;
-        border: none;
-        background: transparent;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: rgba(255, 255, 255, 0.2);
-        color: #ffffff;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    }
-    
-    /* Clean button styling */
-    .stButton > button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 0.75rem 1.5rem;
-        font-weight: 500;
-        font-size: 0.95rem;
-        letter-spacing: -0.01em;
-        transition: all 0.2s ease;
-        height: 44px;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        box-shadow: 0 4px 15px 0 rgba(31, 38, 135, 0.4);
-    }
-    
-    .stButton > button:hover {
-        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px 0 rgba(31, 38, 135, 0.6);
-    }
-    
-    .stButton > button:active {
-        transform: translateY(0);
-    }
-    
-    /* Primary button variant */
-    .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    
-    .stButton > button[kind="primary"]:hover {
-        background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
-    }
-    
-    /* Clean input styling */
-    .stFileUploader {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 2px dashed rgba(255, 255, 255, 0.3);
-        border-radius: 8px;
-        padding: 2rem;
-        transition: all 0.2s ease;
-        text-align: center;
-    }
-    
-    .stFileUploader:hover {
-        border-color: rgba(255, 255, 255, 0.5);
-        background: rgba(255, 255, 255, 0.15);
-    }
-    
-    .stTextArea textarea {
-        border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        font-family: 'Inter', sans-serif;
-        transition: all 0.2s ease;
-        padding: 0.75rem;
-        font-size: 0.95rem;
-        resize: vertical;
-        color: #ffffff;
-    }
-    
-    .stTextArea textarea:focus {
-        border-color: rgba(255, 255, 255, 0.6);
-        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-        outline: none;
-        background: rgba(255, 255, 255, 0.15);
-    }
-    
-    .stSelectbox select {
-        border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        font-family: 'Inter', sans-serif;
-        padding: 0.75rem;
-        font-size: 0.95rem;
-        transition: all 0.2s ease;
-        color: #ffffff;
-    }
-    
-    .stSelectbox select:focus {
-        border-color: rgba(255, 255, 255, 0.6);
-        box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
-        outline: none;
-        background: rgba(255, 255, 255, 0.15);
-    }
-    
-    /* Clean metrics cards */
-    [data-testid="metric-container"] {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 1.5rem;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        transition: all 0.2s ease;
-    }
-    
-    [data-testid="metric-container"]:hover {
-        background: rgba(255, 255, 255, 0.15);
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.5);
-    }
-    
-    [data-testid="metric-container"] > div {
-        color: #ffffff;
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-value"] {
-        color: #ffffff;
-        font-size: 1.5rem;
-        font-weight: 600;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-    
-    [data-testid="metric-container"] [data-testid="metric-label"] {
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 0.875rem;
-        font-weight: 500;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    
-    /* Clean results sections */
-    .results-container {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 8px;
-        padding: 2rem;
-        margin: 1.5rem 0;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-    }
-    
-    /* Clean section headers */
-    h1, h2, h3 {
-        color: #ffffff;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-    
-    h3 {
-        color: #ffffff;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-        padding-bottom: 0.5rem;
-        margin-bottom: 1.5rem;
-        font-size: 1.25rem;
-    }
-    
-    h4 {
-        color: rgba(255, 255, 255, 0.9);
-        font-weight: 500;
-        font-size: 1.1rem;
-        margin-bottom: 1rem;
-    }
-    
-    /* Clean alert messages */
-    .stInfo {
-        background: rgba(59, 130, 246, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        border-left: 4px solid #3b82f6;
-        border-radius: 6px;
-        padding: 1rem;
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .stSuccess {
-        background: rgba(34, 197, 94, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(34, 197, 94, 0.3);
-        border-left: 4px solid #22c55e;
-        border-radius: 6px;
-        padding: 1rem;
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .stError {
-        background: rgba(239, 68, 68, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        border-left: 4px solid #ef4444;
-        border-radius: 6px;
-        padding: 1rem;
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    .stWarning {
-        background: rgba(245, 158, 11, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(245, 158, 11, 0.3);
-        border-left: 4px solid #f59e0b;
-        border-radius: 6px;
-        padding: 1rem;
-        color: rgba(255, 255, 255, 0.9);
-    }
-    
-    /* Hide Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stDeployButton {display: none;}
-    
-    /* Clean expander styling */
-    .streamlit-expanderHeader {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 6px;
-        padding: 1rem;
-        font-weight: 500;
-        color: #ffffff;
-    }
-    
-    .streamlit-expanderContent {
-        background: rgba(255, 255, 255, 0.1);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 0 0 6px 6px;
-        border-top: none;
-        padding: 1.5rem;
-    }
-    
-    /* Clean download button */
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, #059669 0%, #047857 100%);
-        color: white;
-        border: none;
-        border-radius: 6px;
-        padding: 0.75rem 1.5rem;
-        font-weight: 500;
-        transition: all 0.2s ease;
-        font-size: 0.95rem;
-        box-shadow: 0 4px 15px 0 rgba(5, 150, 105, 0.4);
-    }
-    
-    .stDownloadButton > button:hover {
-        background: linear-gradient(135deg, #047857 0%, #065f46 100%);
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px 0 rgba(5, 150, 105, 0.6);
-    }
-    
-    /* Section headers */
-    .section-header {
-        margin: 2rem 0 1rem 0;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-    }
-    
-    .section-header h4 {
-        color: rgba(255, 255, 255, 0.9);
-        font-size: 1.1rem;
-        font-weight: 600;
-        margin: 0;
-    }
-    
-    /* Responsive design */
-    @media (max-width: 768px) {
+def setup_page_config():
+    """Configure Streamlit page settings."""
+    st.set_page_config(
+        page_title="Medical AI Analyzer",
+        page_icon="🔬",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
+
+
+def apply_custom_css():
+    """Apply custom CSS styling."""
+    st.markdown("""
+    <style>
+        .header-container {
+            text-align: center;
+            margin: 2rem 0 3rem 0;
+            padding: 0;
+        }
+        
         .main-title {
-            font-size: 2rem;
+            color: #1f2937;
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin: 0;
+            letter-spacing: -0.025em;
+            line-height: 1.1;
         }
         
         .subtitle {
-            font-size: 1rem;
+            color: #6b7280;
+            font-size: 1.25rem;
+            font-weight: 400;
+            margin: 0.75rem 0 0 0;
+            letter-spacing: 0.025em;
         }
         
-        .header-container {
-            padding: 2rem 1rem;
-            margin: 1rem 0;
+        .metric-card {
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
         }
-        
-        .analysis-card {
-            padding: 1.5rem;
-            margin: 1rem 0;
-        }
-        
-        .block-container {
-            padding: 1rem 1.5rem;
-        }
-    }
-    
-    /* Loading spinner */
-    .stSpinner {
-        text-align: center;
-        color: #ffffff;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Initialize session state
-if 'analysis_results' not in st.session_state:
-    st.session_state.analysis_results = None
-if 'uploaded_file' not in st.session_state:
-    st.session_state.uploaded_file = None
-if 'processed_text' not in st.session_state:
-    st.session_state.processed_text = None
-
-def extract_text_from_pdf(pdf_file):
-    """Extract text from uploaded PDF file using pypdf"""
-    try:
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            tmp_file.write(pdf_file.getvalue())
-            tmp_file_path = tmp_file.name
-        
-        # Extract text using pypdf
-        text = ""
-        with open(tmp_file_path, 'rb') as file:
-            pdf_reader = pypdf.PdfReader(file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                text += page.extract_text() + "\n"
-        
-        # Clean up temporary file
-        os.unlink(tmp_file_path)
-        
-        return text
-    except Exception as e:
-        st.error(f"Error extracting text from PDF: {str(e)}")
-        return None
-
-def analyze_medical_data(text):
-    """Analyze medical data using LangChain and OpenAI"""
-    try:
-        llm, _, _ = initialize_langchain()
-        if not llm:
-            st.error("Failed to initialize analysis components")
-            return None
-        
-        # Create structured prompt template
-        system_template = """You are a medical data analyst with expertise in analyzing medical documents, reports, and clinical data. 
-        Your role is to provide comprehensive, accurate, and clinically relevant analysis of medical information.
-        
-        Focus on:
-        1. Identifying critical medical information and findings
-        2. Highlighting potential risks, concerns, and red flags
-        3. Providing actionable medical recommendations
-        4. Extracting and explaining important medical terminology
-        5. Assessing data quality and completeness
-        6. Maintaining clinical accuracy and medical standards
-        
-        Always prioritize patient safety and clinical relevance in your analysis.
-        
-        Please respond with a JSON object containing:
-        - summary: Brief summary of the medical data
-        - key_findings: List of key medical findings
-        - risk_factors: List of identified risk factors
-        - recommendations: List of medical recommendations
-        - medical_terms: List of important medical terminology
-        - confidence_score: Confidence score between 0 and 1
-        - critical_alerts: List of critical medical alerts
-        - data_quality: Assessment of data quality (good/medium/poor)"""
-        
-        human_template = """Analyze the following medical text and provide a comprehensive analysis:
-
-Medical Text:
-{text}
-
-Please provide a thorough analysis as a JSON object that would be useful for healthcare professionals."""
-        
-        # Create prompt template
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_template),
-            ("human", human_template)
-        ])
-        
-        # Format the prompt
-        formatted_prompt = prompt.format_messages(
-            text=text[:OPENAI_MAX_TOKENS]
-        )
-        
-        # Get response from LangChain
-        response = llm.invoke(formatted_prompt)
-        
-        # Parse the structured response using our custom parser
-        try:
-            parsed_result = parse_medical_analysis_response(response.content)
-            return parsed_result
-        except Exception as parse_error:
-            logger.error(f"Error parsing analysis response: {parse_error}")
-            st.error("Error parsing analysis results. Please try again.")
-            return None
-            
-    except Exception as e:
-        logger.error(f"Error during medical analysis: {e}")
-        st.error(f"Error during analysis: {str(e)}")
-        return None
-
-def run_disease_prediction(disease, file_data, images_data, video_data, symptoms_text):
-    """Run statistical prediction for a specific disease"""
-    try:
-        # Simulate statistical model prediction (replace with actual models)
-        import random
-        
-        # Extract features from file, images, video, and symptoms
-        features = extract_features_from_data(file_data, images_data, video_data, symptoms_text)
-        
-        # Simulate prediction based on disease type and data available
-        base_confidence = 0.6
-        base_risk = 0.3
-        
-        # Boost confidence and risk based on available data
-        if images_data:
-            base_confidence += 0.15
-            base_risk += 0.1
-        if video_data:
-            base_confidence += 0.1
-            base_risk += 0.05
-        if file_data:
-            base_confidence += 0.1
-            base_risk += 0.05
-        
-        if disease.lower() == "diabetes" and ML_MODELS_AVAILABLE:
-            # Use real ML model for diabetes prediction
-            try:
-                # Create patient data from available information
-                patient_data = create_sample_patient_data()  # Default values
-                
-                # Try to extract real data from symptoms or file if available
-                if symptoms_text:
-                    # Simple keyword extraction (could be enhanced)
-                    symptoms_lower = symptoms_text.lower()
-                    if "age" in symptoms_lower or any(str(i) in symptoms_lower for i in range(18, 100)):
-                        # Try to extract age from text
-                        import re
-                        age_match = re.search(r'\b(\d{2})\b', symptoms_lower)
-                        if age_match:
-                            patient_data['age'] = int(age_match.group(1))
-                    
-                    if "glucose" in symptoms_lower or "blood sugar" in symptoms_lower:
-                        patient_data['glucose_level'] = 140  # Elevated
-                    if "overweight" in symptoms_lower or "obesity" in symptoms_lower:
-                        patient_data['bmi'] = 29.0
-                    if "family history" in symptoms_lower or "diabetes" in symptoms_lower:
-                        patient_data['family_history'] = 1
-                
-                # Get ML prediction
-                ml_result = predict_diabetes(patient_data)
-                
-                # Map to expected format
-                prediction = ml_result['prediction']
-                confidence = ml_result['confidence']
-                risk_score = ml_result['risk_score']
-                
-                # Add ML-specific information
-                ml_recommendations = ml_result.get('recommendations', [])
-                
-            except Exception as e:
-                logger.error(f"Error with ML model, falling back to simulation: {e}")
-                # Fallback to simulation
-                prediction = "High Risk" if random.random() > 0.5 else "Low Risk"
-                confidence = min(random.uniform(base_confidence, base_confidence + 0.25), 0.95)
-                risk_score = min(random.uniform(base_risk, base_risk + 0.4), 0.9)
-                ml_recommendations = ["Consult healthcare provider", "Monitor blood glucose"]
-                
-        elif disease.lower() == "diabetes":
-            prediction = "High Risk" if random.random() > 0.5 else "Low Risk"
-            confidence = min(random.uniform(base_confidence, base_confidence + 0.25), 0.95)
-            risk_score = min(random.uniform(base_risk, base_risk + 0.4), 0.9)
-            ml_recommendations = ["Consult healthcare provider", "Monitor blood glucose"]
-        elif disease.lower() == "hypertension":
-            prediction = "Positive" if random.random() > 0.6 else "Negative"
-            confidence = min(random.uniform(base_confidence, base_confidence + 0.25), 0.92)
-            risk_score = min(random.uniform(base_risk, base_risk + 0.4), 0.85)
-            ml_recommendations = ["Monitor blood pressure", "Reduce sodium intake", "Exercise regularly"]
-        elif disease.lower() == "heart disease":
-            prediction = "High Risk" if random.random() > 0.7 else "Low Risk"
-            confidence = min(random.uniform(base_confidence, base_confidence + 0.25), 0.96)
-            risk_score = min(random.uniform(base_risk, base_risk + 0.4), 0.9)
-            ml_recommendations = ["Cardiac evaluation", "Lifestyle modifications", "Cholesterol monitoring"]
-        else:
-            prediction = "Positive" if random.random() > 0.5 else "Negative"
-            confidence = min(random.uniform(base_confidence, base_confidence + 0.25), 0.9)
-            risk_score = min(random.uniform(base_risk, base_risk + 0.4), 0.8)
-            ml_recommendations = ["Consult healthcare provider", "Follow-up testing", "Monitor symptoms"]
-        
-        # Generate ML-specific results
-        data_types = []
-        if file_data:
-            data_types.append("structured data")
-        if images_data:
-            data_types.append(f"{len(images_data)} medical images")
-        if video_data:
-            data_types.append("medical video")
-        if symptoms_text:
-            data_types.append("symptom text")
-        
-        data_summary = ", ".join(data_types) if data_types else "available data"
-        
-        # Use ML recommendations if available, otherwise default ones
-        final_recommendations = ml_recommendations if 'ml_recommendations' in locals() else [
-            "Consult with healthcare provider",
-            "Monitor symptoms regularly",
-            "Follow up with additional tests if needed"
-        ]
-        
-        result = {
-            "prediction": prediction,
-            "confidence_score": confidence,
-            "risk_score": risk_score,
-            "model_used": f"{disease} {'Real ML Model' if disease.lower() == 'diabetes' and ML_MODELS_AVAILABLE else 'Statistical Model'} v1.0",
-            "prediction_details": f"{'ML model' if disease.lower() == 'diabetes' and ML_MODELS_AVAILABLE else 'Statistical model'} analyzed {len(features)} features from {data_summary} and predicted {prediction.lower()} for {disease}.",
-            "key_features": features[:5],  # Top 5 features
-            "data_types_used": data_types,
-            "recommendations": final_recommendations,
-            "next_steps": [
-                "Schedule medical appointment",
-                "Prepare medical history", 
-                "Bring all relevant test results and images"
-            ]
-        }
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error during ML prediction: {e}")
-        return None
-
-def extract_features_from_data(file_data, images_data, video_data, symptoms_text):
-    """Extract features from uploaded file, images, video, and symptoms text"""
-    features = []
-    
-    # Extract features from symptoms text
-    if symptoms_text:
-        symptoms_lower = symptoms_text.lower()
-        if "pain" in symptoms_lower:
-            features.append("Pain symptoms")
-        if "fever" in symptoms_lower:
-            features.append("Fever")
-        if "fatigue" in symptoms_lower:
-            features.append("Fatigue")
-        if "weight" in symptoms_lower:
-            features.append("Weight changes")
-        if "blood" in symptoms_lower:
-            features.append("Blood-related symptoms")
-    
-    # Extract features from file (simplified)
-    if file_data:
-        features.append("File data available")
-        features.append("Structured medical data")
-    
-    # Extract features from images
-    if images_data:
-        features.append(f"Medical images available ({len(images_data)} images)")
-        features.append("Visual analysis data")
-        features.append("Image-based features")
-        
-        # Simulate image analysis features based on disease
-        if any(img.name.lower().endswith(('.png', '.jpg', '.jpeg')) for img in images_data):
-            features.append("Radiographic imaging")
-        if any(img.name.lower().endswith('.tiff') for img in images_data):
-            features.append("High-resolution imaging")
-    
-    # Extract features from video
-    if video_data:
-        features.append("Medical video available")
-        features.append("Temporal analysis data")
-        features.append("Video-based features")
-        features.append("Motion analysis")
-    
-    # Add some default features
-    features.extend([
-        "Patient demographics",
-        "Medical history",
-        "Current symptoms",
-        "Risk factors"
-    ])
-    
-    return features
+    </style>
+    """, unsafe_allow_html=True)
 
 
-def generate_clinical_pdf_report(results, filename):
-    """Generate a PDF report for clinical analysis results"""
-    try:
-        # Create temporary file for PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            pdf_path = tmp_file.name
-        
-        # Create PDF document
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        story = []
-        
-        # Get styles
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
-            alignment=TA_CENTER,
-            textColor=colors.darkblue
-        )
-        
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=14,
-            spaceAfter=12,
-            spaceBefore=20,
-            textColor=colors.darkblue
-        )
-        
-        normal_style = styles['Normal']
-        
-        # Title
-        story.append(Paragraph("Medical AI Analyzer - Clinical Analysis Report", title_style))
-        story.append(Spacer(1, 20))
-        
-        # Metadata
-        story.append(Paragraph(f"<b>Report Generated:</b> {datetime.now().strftime('%B %d, %Y at %H:%M:%S')}", normal_style))
-        story.append(Paragraph(f"<b>Original File:</b> {filename}", normal_style))
-        story.append(Spacer(1, 20))
-        
-        # Summary
-        if results.get('summary'):
-            story.append(Paragraph("Executive Summary", heading_style))
-            story.append(Paragraph(results['summary'], normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Key Findings
-        if results.get('key_findings'):
-            story.append(Paragraph("Key Findings", heading_style))
-            for finding in results['key_findings']:
-                story.append(Paragraph(f"• {finding}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Risk Factors
-        if results.get('risk_factors'):
-            story.append(Paragraph("Risk Factors", heading_style))
-            for risk in results['risk_factors']:
-                story.append(Paragraph(f"• {risk}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Critical Alerts
-        if results.get('critical_alerts'):
-            story.append(Paragraph("Critical Alerts", heading_style))
-            for alert in results['critical_alerts']:
-                story.append(Paragraph(f"⚠️ {alert}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Recommendations
-        if results.get('recommendations'):
-            story.append(Paragraph("Medical Recommendations", heading_style))
-            for rec in results['recommendations']:
-                story.append(Paragraph(f"• {rec}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Medical Terms
-        if results.get('medical_terms'):
-            story.append(Paragraph("Medical Terminology", heading_style))
-            terms_text = ", ".join(results['medical_terms'])
-            story.append(Paragraph(terms_text, normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Metrics Table
-        story.append(Paragraph("Analysis Metrics", heading_style))
-        metrics_data = [
-            ["Metric", "Value"],
-            ["Confidence Score", f"{results.get('confidence_score', 0):.1%}"],
-            ["Data Quality", results.get('data_quality', 'Unknown')],
-            ["Total Findings", str(len(results.get('key_findings', [])) + len(results.get('risk_factors', [])))],
-            ["Critical Alerts", str(len(results.get('critical_alerts', [])))]
-        ]
-        
-        metrics_table = Table(metrics_data, colWidths=[2*inch, 3*inch])
-        metrics_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(metrics_table)
-        
-        # Build PDF
-        doc.build(story)
-        
-        # Read the generated PDF
-        with open(pdf_path, 'rb') as pdf_file:
-            pdf_content = pdf_file.read()
-        
-        # Clean up temporary file
-        os.unlink(pdf_path)
-        
-        return pdf_content
-        
-    except Exception as e:
-        logger.error(f"Error generating PDF report: {e}")
-        return None
-
-
-def generate_prediction_pdf_report(results, disease_name, filename):
-    """Generate a PDF report for ML prediction results"""
-    try:
-        # Create temporary file for PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            pdf_path = tmp_file.name
-        
-        # Create PDF document
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        story = []
-        
-        # Get styles
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
-            alignment=TA_CENTER,
-            textColor=colors.darkblue
-        )
-        
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=14,
-            spaceAfter=12,
-            spaceBefore=20,
-            textColor=colors.darkblue
-        )
-        
-        normal_style = styles['Normal']
-        
-        # Title
-        story.append(Paragraph(f"Medical AI Analyzer - {disease_name} Prediction Report", title_style))
-        story.append(Spacer(1, 20))
-        
-        # Metadata
-        story.append(Paragraph(f"<b>Report Generated:</b> {datetime.now().strftime('%B %d, %Y at %H:%M:%S')}", normal_style))
-        story.append(Paragraph(f"<b>Disease Analyzed:</b> {disease_name}", normal_style))
-        story.append(Paragraph(f"<b>Model Used:</b> {results.get('model_used', 'Unknown')}", normal_style))
-        story.append(Spacer(1, 20))
-        
-        # Prediction Results
-        story.append(Paragraph("Prediction Results", heading_style))
-        prediction_data = [
-            ["Metric", "Value"],
-            ["Prediction", results.get('prediction', 'Unknown').title()],
-            ["Confidence Score", f"{results.get('confidence_score', 0):.1%}"],
-            ["Risk Score", f"{results.get('risk_score', 0):.1%}"],
-            ["Model Used", results.get('model_used', 'Unknown')]
-        ]
-        
-        prediction_table = Table(prediction_data, colWidths=[2*inch, 3*inch])
-        prediction_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(prediction_table)
-        story.append(Spacer(1, 15))
-        
-        # Prediction Details
-        if results.get('prediction_details'):
-            story.append(Paragraph("Prediction Details", heading_style))
-            story.append(Paragraph(results['prediction_details'], normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Key Features
-        if results.get('key_features'):
-            story.append(Paragraph("Key Features Used", heading_style))
-            for feature in results['key_features']:
-                story.append(Paragraph(f"• {feature}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Data Types Used
-        if results.get('data_types_used'):
-            story.append(Paragraph("Data Types Analyzed", heading_style))
-            for data_type in results['data_types_used']:
-                story.append(Paragraph(f"• {data_type}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Recommendations
-        if results.get('recommendations'):
-            story.append(Paragraph("ML Recommendations", heading_style))
-            for rec in results['recommendations']:
-                story.append(Paragraph(f"• {rec}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Next Steps
-        if results.get('next_steps'):
-            story.append(Paragraph("Recommended Next Steps", heading_style))
-            for step in results['next_steps']:
-                story.append(Paragraph(f"• {step}", normal_style))
-            story.append(Spacer(1, 15))
-        
-        # Build PDF
-        doc.build(story)
-        
-        # Read the generated PDF
-        with open(pdf_path, 'rb') as pdf_file:
-            pdf_content = pdf_file.read()
-        
-        # Clean up temporary file
-        os.unlink(pdf_path)
-        
-        return pdf_content
-        
-    except Exception as e:
-        logger.error(f"Error generating PDF report: {e}")
-        return None
-
-def main():
-    # Initialize session state for page navigation
-    if 'current_page' not in st.session_state:
-        st.session_state.current_page = 'main'
-    
-    # Initialize session state for configuration
-    if 'disease_config' not in st.session_state:
-        st.session_state.disease_config = {
-            "Diabetes": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff"],
-                "video_types": ["mp4", "avi", "mov"],
-                "description": "Diabetes prediction and monitoring"
-            },
-            "Hypertension": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg"],
-                "video_types": [],
-                "description": "Blood pressure monitoring and analysis"
-            },
-            "Heart Disease": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff", "bmp"],
-                "video_types": ["mp4", "avi", "mov", "mkv"],
-                "description": "Cardiovascular disease prediction"
-            },
-            "Cancer": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff", "bmp"],
-                "video_types": ["mp4", "avi", "mov"],
-                "description": "Cancer screening and detection"
-            },
-            "COVID-19": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff"],
-                "video_types": [],
-                "description": "COVID-19 detection and monitoring"
-            },
-            "Pneumonia": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff", "bmp"],
-                "video_types": [],
-                "description": "Pneumonia detection from chest X-rays"
-            },
-            "Stroke": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff", "bmp"],
-                "video_types": ["mp4", "avi", "mov"],
-                "description": "Stroke risk assessment and detection"
-            },
-            "Kidney Disease": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff"],
-                "video_types": [],
-                "description": "Kidney function analysis"
-            },
-            "Liver Disease": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff", "bmp"],
-                "video_types": [],
-                "description": "Liver function and disease detection"
-            },
-            "Thyroid Disorders": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": ["png", "jpg", "jpeg", "tiff"],
-                "video_types": [],
-                "description": "Thyroid function analysis"
-            },
-            "Depression": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": [],
-                "video_types": [],
-                "description": "Mental health assessment"
-            },
-            "Anxiety": {
-                "file_types": ["csv", "json", "txt"],
-                "image_types": [],
-                "video_types": [],
-                "description": "Anxiety disorder assessment"
-            }
-        }
-    
-    # Navigation logic
-    if st.session_state.current_page == 'config':
-        show_configuration_page()
-    else:
-        show_main_page()
-
-
-def show_main_page():
-    """Display the main application page"""
-    # Clean, minimalist header
+def render_header():
+    """Render the application header."""
     st.markdown(f'''
     <div class="header-container">
         <h1 class="main-title">{APP_TITLE}</h1>
         <p class="subtitle">AI-Powered Medical Analysis Platform</p>
     </div>
     ''', unsafe_allow_html=True)
-    
-    # Initialize session state for analysis status
-    if 'analysis_status' not in st.session_state:
-        st.session_state.analysis_status = "Ready"
-    
-    if 'analysis_history' not in st.session_state:
-        st.session_state.analysis_history = []
-    
-    # Create tabs for different functionalities
-    tab1, tab2 = st.tabs(["Clinical Analysis", "Disease Prediction"])
-    
-    with tab1:
-        # Clinical Analysis Section with clean layout
-        st.markdown('''
-        <div class="analysis-card">
-            <h3>Clinical Document Analysis</h3>
-            <p style="color: #64748b; margin-bottom: 1.5rem;">Upload medical documents for comprehensive AI-powered analysis and insights.</p>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        # File upload in a clean container
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            uploaded_file = st.file_uploader(
-                "Choose a medical PDF file",
-                type=ALLOWED_FILE_TYPES,
-                help="Upload a medical document in PDF format for clinical analysis",
-                label_visibility="collapsed"
-            )
-        
-        if uploaded_file is not None:
-            st.session_state.uploaded_file = uploaded_file
-            
-            # Show file info in a clean format
-            st.markdown(f'''
-            <div class="analysis-card">
-                <div style="display: flex; align-items: center; gap: 1rem;">
-                    <div style="background: #3b82f6; 
-                                color: white; 
-                                padding: 0.75rem; 
-                                border-radius: 6px; 
-                                font-weight: 600;
-                                font-size: 0.875rem;">PDF</div>
-                    <div>
-                        <h4 style="margin: 0; color: #1e293b;">{uploaded_file.name}</h4>
-                        <p style="margin: 0; color: #64748b; font-size: 0.875rem;">
-                            {uploaded_file.size / 1024:.1f} KB • PDF Document
-                        </p>
-                    </div>
-                </div>
-            </div>
-            ''', unsafe_allow_html=True)
-            
-            # Analyze button with clean styling
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
-                if st.button("Analyze Document", type="primary", use_container_width=True):
-                    # Update status
-                    st.session_state.analysis_status = "Extracting text..."
-                
-                with st.spinner("Extracting text from PDF..."):
-                    extracted_text = extract_text_from_pdf(uploaded_file)
-                    
-                    if extracted_text:
-                        st.session_state.processed_text = extracted_text
-                        st.success(f"Successfully extracted {len(extracted_text):,} characters")
-                        
-                        # Update status
-                        st.session_state.analysis_status = "Analyzing with LangChain..."
-                        
-                        with st.spinner("Analyzing with LangChain..."):
-                            analysis_results = analyze_medical_data(extracted_text)
-                            if analysis_results:
-                                st.session_state.analysis_results = analysis_results
-                                st.session_state.analysis_status = "Completed"
-                                st.success("Clinical analysis completed successfully!")
-                                
-                                # Add to history
-                                st.session_state.analysis_history.append({
-                                    'timestamp': datetime.now().strftime("%H:%M:%S"),
-                                    'type': 'Clinical Analysis',
-                                    'status': 'Success',
-                                    'filename': uploaded_file.name
-                                })
-                            else:
-                                st.session_state.analysis_status = "Failed"
-                                st.error("Analysis failed. Please check your configuration.")
-                                
-                                # Add to history
-                                st.session_state.analysis_history.append({
-                                    'timestamp': datetime.now().strftime("%H:%M:%S"),
-                                    'type': 'Clinical Analysis',
-                                    'status': 'Failed',
-                                    'filename': uploaded_file.name
-                                })
-        
-        # Display analysis results with enhanced styling
-        if st.session_state.analysis_results:
-            results = st.session_state.analysis_results
-            
-            # Metrics row with enhanced cards
-            st.markdown('<div class="results-container">', unsafe_allow_html=True)
-            
-            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
-            with metric_col1:
-                confidence = results.get('confidence_score', 0)
-                st.metric("Confidence", f"{confidence:.0%}")
-            with metric_col2:
-                total_findings = len(results.get('key_findings', [])) + len(results.get('risk_factors', [])) + len(results.get('critical_alerts', []))
-                st.metric("Total Findings", total_findings)
-            with metric_col3:
-                data_quality = results.get('data_quality', 'Unknown')
-                st.metric("Data Quality", data_quality.title())
-            with metric_col4:
-                critical_alerts = len(results.get('critical_alerts', []))
-                st.metric("Critical Alerts", critical_alerts)
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Results display with clean organization
-            st.markdown("### Clinical Analysis Results")
-            
-            # Summary section
-            if results.get('summary'):
-                st.markdown('''
-                <div class="analysis-card">
-                    <h4 style="color: #1e293b; margin-bottom: 1rem;">Executive Summary</h4>
-                </div>
-                ''', unsafe_allow_html=True)
-                st.info(results["summary"])
-            
-            # Findings sections in organized layout
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Key findings
-                if results.get('key_findings'):
-                    st.markdown('''
-                    <div class="analysis-card">
-                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Key Medical Findings</h4>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    for i, finding in enumerate(results['key_findings'][:5], 1):
-                        st.markdown(f"**{i}.** {finding}")
-                
-                # Medical terms
-                if results.get('medical_terms'):
-                    st.markdown('''
-                    <div class="analysis-card" style="margin-top: 1.5rem;">
-                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Medical Terminology</h4>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    terms_text = ", ".join(results['medical_terms'][:8])
-                    if len(results['medical_terms']) > 8:
-                        terms_text += f" (+{len(results['medical_terms']) - 8} more)"
-                    st.markdown(f"*{terms_text}*")
-            
-            with col2:
-                # Risk factors and alerts
-                if results.get('risk_factors') or results.get('critical_alerts'):
-                    st.markdown('''
-                    <div class="analysis-card">
-                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Risk Assessment</h4>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    # Critical alerts first
-                    if results.get('critical_alerts'):
-                        for alert in results['critical_alerts'][:3]:
-                            st.error(f"**CRITICAL:** {alert}")
-                    
-                    # Risk factors
-                    if results.get('risk_factors'):
-                        for i, risk in enumerate(results['risk_factors'][:5], 1):
-                            st.warning(f"**{i}.** {risk}")
-                
-                # Recommendations
-                if results.get('recommendations'):
-                    st.markdown('''
-                    <div class="analysis-card" style="margin-top: 1.5rem;">
-                        <h4 style="color: #1e293b; margin-bottom: 1rem;">Medical Recommendations</h4>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    for i, rec in enumerate(results['recommendations'][:5], 1):
-                        st.success(f"**{i}.** {rec}")
-            
-            # Export section with clean styling
-            st.markdown("---")
-            st.markdown('''
-            <div class="analysis-card">
-                <h4 style="color: #1e293b; margin-bottom: 1rem;">Export Results</h4>
-                <p style="color: #64748b; margin-bottom: 1.5rem;">Download your analysis results in PDF format for sharing with healthcare providers.</p>
-            </div>
-            ''', unsafe_allow_html=True)
-            
-            col1, col2, col3 = st.columns([1, 1, 1])
-            with col2:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"clinical_analysis_{timestamp}.pdf"
-                
-                # Generate PDF report
-                pdf_content = generate_clinical_pdf_report(
-                    st.session_state.analysis_results,
-                    st.session_state.uploaded_file.name if st.session_state.uploaded_file else "Unknown"
-                )
-                
-                if pdf_content:
-                    st.download_button(
-                        label="Download Clinical Analysis PDF",
-                        data=pdf_content,
-                        file_name=filename,
-                        mime="application/pdf"
-                    )
-                else:
-                    st.error("Failed to generate PDF report. Please try again.")
-            
-            # Reset button - clean styling
-            if st.session_state.analysis_results:
-                st.markdown("---")
-                st.markdown("### Reset Analysis")
-                if st.button("Reset Analysis", help="Clear analysis and delete files", use_container_width=True):
-                    st.session_state.analysis_results = None
-                    st.session_state.uploaded_file = None
-                    st.session_state.processed_text = None
-                    st.session_state.analysis_status = "Ready"
-                    st.success("Reset completed! Analysis cleared and files deleted.")
-                    st.rerun()
-    
-    with tab2:
-        # Disease Prediction Section
-        st.subheader("Disease Prediction")
-        st.markdown("Upload medical data and get ML-powered disease predictions.")
-        
-        # Disease selection - use configuration from session state
-        if 'disease_config' not in st.session_state:
-            # Initialize with default diseases if not set
-            st.session_state.disease_config = {
-                "Diabetes": {"file_types": ["csv", "json", "txt"], "image_types": ["png", "jpg", "jpeg"], "video_types": ["mp4", "avi"], "description": "Diabetes prediction"},
-                "Hypertension": {"file_types": ["csv", "json", "txt"], "image_types": ["png", "jpg"], "video_types": [], "description": "Blood pressure monitoring"},
-                "Heart Disease": {"file_types": ["csv", "json", "txt"], "image_types": ["png", "jpg", "jpeg", "tiff"], "video_types": ["mp4", "avi", "mov"], "description": "Cardiovascular disease"}
-            }
-        
-        diseases = ["Select an option"] + list(st.session_state.disease_config.keys())
-        
-        selected_disease = st.selectbox(
-            "Select Disease for Prediction:",
-            diseases,
-            help="Choose the disease you want to predict"
-        )
-        
-        # Check if a valid disease is selected (not the default option)
-        is_disease_selected = selected_disease and selected_disease != "Select an option"
-        
-        # Only show upload buttons when a disease is selected
-        if is_disease_selected:
-            st.markdown(f"**Upload data for {selected_disease} prediction:**")
-            
-            # Create 3 columns for file uploads
-            upload_col1, upload_col2, upload_col3 = st.columns(3)
-            
-            with upload_col1:
-                # File upload for disease prediction - use configured file types
-                disease_config = st.session_state.disease_config.get(selected_disease, {})
-                file_types = disease_config.get('file_types', ['csv', 'json', 'txt'])
-                
-                if file_types:
-                    disease_file = st.file_uploader(
-                        f"Upload medical data file ({', '.join(file_types).upper()}):",
-                        type=file_types,
-                        help=f"Upload patient data, test results, or medical records for {selected_disease} prediction"
-                    )
-                else:
-                    st.info("No data file types configured for this disease")
-                    disease_file = None
-            
-            with upload_col2:
-                # Image upload for disease prediction - use configured image types
-                image_types = disease_config.get('image_types', [])
-                
-                if image_types:
-                    disease_images = st.file_uploader(
-                        f"Upload medical images ({', '.join(image_types).upper()}):",
-                        type=image_types,
-                        accept_multiple_files=True,
-                        help=f"Upload medical images for {selected_disease} visual analysis"
-                    )
-                else:
-                    st.info("No image types configured for this disease")
-                    disease_images = None
-            
-            with upload_col3:
-                # Video upload for disease prediction - use configured video types
-                video_types = disease_config.get('video_types', [])
-                
-                if video_types:
-                    disease_video = st.file_uploader(
-                        f"Upload medical video ({', '.join(video_types).upper()}):",
-                        type=video_types,
-                        help=f"Upload medical videos for {selected_disease} temporal analysis"
-                    )
-                else:
-                    st.info("No video types configured for this disease")
-                    disease_video = None
-        else:
-            # Initialize variables when no disease is selected
-            disease_file = None
-            disease_images = None
-            disease_video = None
-        
-        # Only show additional inputs and analysis when a disease is selected
-        if is_disease_selected:
-            # Additional symptoms input
-            symptoms_input = st.text_area(
-                "Additional symptoms or notes:",
-                height=100,
-                placeholder="Enter any additional symptoms, observations, or medical notes...",
-                help="Provide additional context for the ML prediction"
-            )
-            
-            # Display uploaded media information
-            if disease_images or disease_video:
-                st.markdown("**Uploaded Media:**")
-                if disease_images:
-                    st.write(f"• {len(disease_images)} medical image(s) uploaded")
-                if disease_video:
-                    st.write(f"• Medical video uploaded: {disease_video.name}")
-                st.markdown("---")
-            
-            # Predict button
-            if st.button("Run analysis", type="primary", use_container_width=True):
-                if disease_file is not None or disease_images is not None or disease_video is not None or symptoms_input.strip():
-                    # Update status
-                    st.session_state.analysis_status = f"Running ML prediction for {selected_disease}..."
-                    
-                    with st.spinner(f"Running ML prediction for {selected_disease}..."):
-                        # Simulate ML prediction (replace with actual ML model)
-                        prediction_results = run_disease_prediction(selected_disease, disease_file, disease_images, disease_video, symptoms_input)
-                        if prediction_results:
-                            st.session_state.prediction_results = prediction_results
-                            st.session_state.analysis_status = "Completed"
-                            st.success("ML prediction completed successfully!")
-                            
-                            # Add to history
-                            st.session_state.analysis_history.append({
-                                'timestamp': datetime.now().strftime("%H:%M:%S"),
-                                'type': f'ML Prediction: {selected_disease}',
-                                'status': 'Success',
-                                'filename': disease_file.name if disease_file else 'Text input'
-                            })
-                        else:
-                            st.session_state.analysis_status = "Failed"
-                            st.error("ML prediction failed. Please check your data.")
-                            
-                            # Add to history
-                            st.session_state.analysis_history.append({
-                                'timestamp': datetime.now().strftime("%H:%M:%S"),
-                                'type': f'ML Prediction: {selected_disease}',
-                                'status': 'Failed',
-                                'filename': disease_file.name if disease_file else 'Text input'
-                            })
-                else:
-                    st.warning("Please upload a file, image, video, or enter symptoms for prediction.")
-        else:
-            # Initialize variables when no disease is selected
-            symptoms_input = ""
-        
-        # Display ML prediction results only when a disease is selected
-        if is_disease_selected and hasattr(st.session_state, 'prediction_results') and st.session_state.prediction_results:
-            results = st.session_state.prediction_results
-            
-            # ML prediction metrics
-            pred_col1, pred_col2, pred_col3, pred_col4 = st.columns(4)
-            with pred_col1:
-                prediction = results.get('prediction', 'Unknown').title()
-                st.metric("Prediction", prediction)
-            with pred_col2:
-                confidence = results.get('confidence_score', 0)
-                st.metric("Confidence", f"{confidence:.0%}")
-            with pred_col3:
-                risk_score = results.get('risk_score', 0)
-                st.metric("Risk Score", f"{risk_score:.0%}")
-            with pred_col4:
-                model_used = results.get('model_used', 'Unknown')
-                st.metric("Model", model_used)
-            
-            # ML prediction results
-            st.markdown("### ML Prediction Results")
-            
-            # Prediction details
-            if results.get('prediction_details'):
-                st.markdown("**Prediction Details**")
-                st.write(results['prediction_details'])
-            
-            # Key features (if available)
-            if results.get('key_features'):
-                st.markdown("**Key Features Used**")
-                features_text = " • ".join(results['key_features'])
-                st.write(features_text)
-            
-            # Recommendations (if available)
-            if results.get('recommendations'):
-                st.markdown("**ML Recommendations**")
-                recs_text = " • ".join(results['recommendations'])
-                st.write(recs_text)
-            
-            # Next steps (if available)
-            if results.get('next_steps'):
-                st.markdown("**Next Steps**")
-                steps_text = " • ".join(results['next_steps'])
-                st.write(steps_text)
-            
-            # Export ML prediction results
-            st.markdown("---")
-            st.markdown("### Export ML Prediction")
-            
-            if st.button("Export ML Prediction"):
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"ml_prediction_{selected_disease.lower().replace(' ', '_')}_{timestamp}.pdf"
-                
-                # Generate PDF report
-                pdf_content = generate_prediction_pdf_report(
-                    st.session_state.prediction_results,
-                    selected_disease,
-                    disease_file.name if disease_file else "Text input"
-                )
-                
-                if pdf_content:
-                    st.download_button(
-                        label="📄 Download ML Prediction PDF",
-                        data=pdf_content,
-                        file_name=filename,
-                        mime="application/pdf"
-                    )
-                else:
-                    st.error("Failed to generate PDF report. Please try again.")
-            
-            # Reset button at the end - only show when prediction is performed
-            if st.session_state.prediction_results:
-                st.markdown("---")
-                st.markdown("### Reset Prediction")
-                if st.button("🔄 Reset Prediction", key="reset_prediction_end", help="Clear prediction and delete files", use_container_width=True):
-                    if 'prediction_results' in st.session_state:
-                        del st.session_state.prediction_results
-                    st.session_state.analysis_status = "Ready"
-                    st.success("Reset completed! Prediction cleared and files deleted.")
-                    st.rerun()
-    
-    # Configuration button at the bottom
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("Configuration", help="Manage diseases and file types", use_container_width=True):
-            st.session_state.current_page = 'config'
-            st.rerun()
 
 
-def show_configuration_page():
-    """Display the configuration page with clean styling"""
-    # Clean header
-    st.markdown('''
-    <div class="header-container">
-        <h1 class="main-title">System Configuration</h1>
-        <p class="subtitle">Manage disease types, file formats, and AI model settings</p>
-    </div>
-    ''', unsafe_allow_html=True)
+def render_document_analysis_tab(analyzer: MedicalAnalyzer):
+    """Render the document analysis tab."""
+    st.markdown("### Clinical Document Analysis")
+    st.markdown("Upload medical documents for AI-powered analysis and insights.")
     
-    # Navigation back button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col1:
-        if st.button("← Back to Main", help="Return to main application", use_container_width=True):
-            st.session_state.current_page = 'main'
-            st.rerun()
+    uploaded_file = st.file_uploader(
+        "Choose a medical PDF file",
+        type=ALLOWED_FILE_TYPES,
+        help="Upload a medical document in PDF format"
+    )
     
-    # Configuration tabs with modern styling
-    st.markdown("##")
-    
-    create_tab, edit_tab, manage_tab = st.tabs(["Create Disease", "Edit Diseases", "Import/Export"])
-    
-    with create_tab:
-        st.markdown('''
-        <div class="analysis-card">
-            <h3 style="color: #1e293b; margin-bottom: 1rem;">Add New Disease Configuration</h3>
-            <p style="color: #64748b; margin-bottom: 2rem;">
-                Create a new disease profile with customized file type support and analysis parameters.
-            </p>
-        </div>
-        ''', unsafe_allow_html=True)
+    if uploaded_file is not None:
+        with st.spinner("Extracting text from PDF..."):
+            text = analyzer.extract_text_from_pdf(uploaded_file)
         
-        # Disease information section
-        st.markdown('''
-        <div class="section-header">
-            <h4>Disease Information</h4>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            new_disease_name = st.text_input("Disease Name:", 
-                                           placeholder="e.g., Diabetes, Hypertension", 
-                                           key="new_disease_name",
-                                           help="Enter the medical condition name")
-        with col2:
-            new_disease_category = st.selectbox("Category:", 
-                                              ["Metabolic", "Cardiovascular", "Neurological", 
-                                               "Respiratory", "Endocrine", "Oncological", "Other"],
-                                              help="Select the medical category")
-        
-        new_disease_description = st.text_area("Description:", 
-                                             placeholder="Enter detailed description of the condition...", 
-                                             key="new_disease_description",
-                                             height=100,
-                                             help="Provide clinical context and analysis focus")
-        
-        # File type configuration section
-        st.markdown('''
-        <div class="section-header" style="margin-top: 2rem;">
-            <h4>📁 Supported File Types</h4>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**📊 Data Files**")
-            new_file_types = st.multiselect(
-                "Data formats:",
-                ["csv", "json", "txt", "xlsx", "xml", "pdf"],
-                default=["csv", "json", "txt"],
-                help="Select supported data file formats",
-                key="new_file_types"
-            )
-        
-        with col2:
-            st.markdown("**🖼️ Medical Images**")
-            new_image_types = st.multiselect(
-                "Image formats:",
-                ["png", "jpg", "jpeg", "tiff", "bmp", "dicom"],
-                default=["png", "jpg", "jpeg"],
-                help="Select medical imaging formats",
-                key="new_image_types"
-            )
-        
-        with col3:
-            st.markdown("**🎥 Video/Motion**")
-            new_video_types = st.multiselect(
-                "Video formats:",
-                ["mp4", "avi", "mov", "mkv", "wmv"],
-                default=[],
-                help="Select video formats for motion analysis",
-                key="new_video_types"
-            )
-        
-        # Advanced settings
-        st.markdown('''
-        <div class="section-header" style="margin-top: 2rem;">
-            <h4>⚡ AI Model Settings</h4>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            confidence_threshold = st.slider("Confidence Threshold", 0.1, 1.0, 0.7, 0.1,
-                                            help="Minimum confidence for predictions")
-        with col2:
-            analysis_depth = st.selectbox("Analysis Depth", 
-                                        ["Basic", "Standard", "Comprehensive"],
-                                        index=1,
-                                        help="Level of AI analysis detail")
-        
-        # Save configuration
-        st.markdown("---")
-        save_col1, save_col2, save_col3 = st.columns([1, 1, 1])
-        with save_col2:
-            if st.button("💾 Create Disease Configuration", type="primary", use_container_width=True):
-                if new_disease_name and new_disease_name not in st.session_state.disease_config:
-                    st.session_state.disease_config[new_disease_name] = {
-                        "file_types": new_file_types,
-                        "image_types": new_image_types,
-                        "video_types": new_video_types,
-                        "description": new_disease_description,
-                        "category": new_disease_category,
-                        "confidence_threshold": confidence_threshold,
-                        "analysis_depth": analysis_depth
-                    }
-                    st.success(f"✅ Disease '{new_disease_name}' configured successfully!")
-                    # Clear form
-                    st.session_state.new_disease_name = ""
-                    st.session_state.new_disease_description = ""
-                    time.sleep(1)
-                    st.rerun()
-                elif new_disease_name in st.session_state.disease_config:
-                    st.error("❌ Disease already exists! Use the Edit tab to modify.")
-                else:
-                    st.error("❌ Please enter a disease name!")
-    
-    with edit_tab:
-        st.markdown('''
-        <div class="analysis-card">
-            <h3 style="color: #374151; margin-bottom: 1rem;">✏️ Manage Disease Configurations</h3>
-            <p style="color: #6b7280; margin-bottom: 2rem;">
-                Edit existing disease profiles or remove outdated configurations.
-            </p>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        # Check if there are diseases to edit
-        if not st.session_state.disease_config:
-            st.markdown('''
-            <div class="analysis-card" style="text-align: center; padding: 3rem;">
-                <h4 style="color: #6b7280;">📋 No Disease Configurations Found</h4>
-                <p style="color: #9ca3af; margin-bottom: 2rem;">
-                    Create your first disease configuration using the "Create Disease" tab.
-                </p>
-            </div>
-            ''', unsafe_allow_html=True)
-        else:
-            # Display diseases in card format
-            for i, (disease_name, config) in enumerate(st.session_state.disease_config.items()):
-                # Enhanced disease card
-                st.markdown(f'''
-                <div class="analysis-card" style="margin-bottom: 1.5rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                        <h4 style="color: #374151; margin: 0;">🏥 {disease_name}</h4>
-                        <span style="background: #e5e7eb; color: #374151; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.875rem;">
-                            {config.get('category', 'Other')}
-                        </span>
-                    </div>
-                    <p style="color: #6b7280; margin-bottom: 1.5rem;">{config.get('description', 'No description available')}</p>
-                </div>
-                ''', unsafe_allow_html=True)
+        if text:
+            st.success(f"Text extracted successfully ({len(text)} characters)")
+            
+            if st.button("Analyze Document", type="primary"):
+                with st.spinner("Analyzing document..."):
+                    analysis = analyzer.analyze_medical_document(text)
                 
-                # Configuration details in columns
-                col1, col2, col3, col4 = st.columns(4)
+                # Display results
+                col1, col2 = st.columns(2)
                 
                 with col1:
-                    if config.get('file_types'):
-                        st.markdown("**📊 Data Files:**")
-                        for file_type in config['file_types'][:3]:
-                            st.markdown(f"• {file_type.upper()}")
-                        if len(config['file_types']) > 3:
-                            st.markdown(f"• +{len(config['file_types']) - 3} more")
-                    else:
-                        st.info("No data files")
+                    st.markdown("#### Summary")
+                    st.write(analysis.summary)
+                    
+                    if analysis.key_findings:
+                        st.markdown("#### Key Findings")
+                        for finding in analysis.key_findings:
+                            st.write(f"• {finding}")
                 
                 with col2:
-                    if config.get('image_types'):
-                        st.markdown("**🖼️ Images:**")
-                        for img_type in config['image_types'][:3]:
-                            st.markdown(f"• {img_type.upper()}")
-                        if len(config['image_types']) > 3:
-                            st.markdown(f"• +{len(config['image_types']) - 3} more")
-                    else:
-                        st.info("No images")
-                
-                with col3:
-                    if config.get('video_types'):
-                        st.markdown("**🎥 Videos:**")
-                        for vid_type in config['video_types'][:3]:
-                            st.markdown(f"• {vid_type.upper()}")
-                        if len(config['video_types']) > 3:
-                            st.markdown(f"• +{len(config['video_types']) - 3} more")
-                    else:
-                        st.info("No videos")
-                
-                with col4:
-                    st.markdown("**⚡ Settings:**")
-                    threshold = config.get('confidence_threshold', 0.7)
-                    depth = config.get('analysis_depth', 'Standard')
-                    st.markdown(f"• Confidence: {threshold:.1f}")
-                    st.markdown(f"• Depth: {depth}")
-                
-                # Action buttons
-                action_col1, action_col2, action_col3 = st.columns(3)
-                with action_col1:
-                    if st.button(f"✏️ Edit", key=f"edit_{i}", use_container_width=True):
-                        st.session_state.editing_disease = disease_name
-                        st.rerun()
-                
-                with action_col2:
-                    if st.button(f"🗂️ Duplicate", key=f"duplicate_{i}", use_container_width=True):
-                        new_name = f"{disease_name} (Copy)"
-                        st.session_state.disease_config[new_name] = config.copy()
-                        st.success(f"✅ Duplicated as '{new_name}'")
-                        st.rerun()
-                
-                with action_col3:
-                    if st.button(f"🗑️ Delete", key=f"delete_{i}", use_container_width=True, type="secondary"):
-                        st.session_state.deleting_disease = disease_name
-                        st.rerun()
-                
-                # Handle editing state
-                if 'editing_disease' in st.session_state and st.session_state.editing_disease == disease_name:
-                    st.markdown("**Editing Configuration:**")
+                    if analysis.risk_factors:
+                        st.markdown("#### Risk Factors")
+                        for risk in analysis.risk_factors:
+                            st.write(f"• {risk}")
                     
-                    edit_col1, edit_col2 = st.columns(2)
-                    with edit_col1:
-                        if st.button("💾 Save Changes", key=f"save_{i}", type="primary"):
-                            del st.session_state.editing_disease
-                            st.success("✅ Changes saved!")
-                            st.rerun()
-                    
-                    with edit_col2:
-                        if st.button("❌ Cancel", key=f"cancel_{i}"):
-                            del st.session_state.editing_disease
-                            st.rerun()
+                    if analysis.recommendations:
+                        st.markdown("#### Recommendations")
+                        for rec in analysis.recommendations:
+                            st.write(f"• {rec}")
                 
-                # Handle deletion confirmation
-                if 'deleting_disease' in st.session_state and st.session_state.deleting_disease == disease_name:
-                    st.error(f"⚠️ Are you sure you want to delete '{disease_name}'?")
-                    
-                    confirm_col1, confirm_col2 = st.columns(2)
-                    with confirm_col1:
-                        if st.button("✅ Confirm Delete", key=f"confirm_delete_{i}", type="primary"):
-                            del st.session_state.disease_config[disease_name]
-                            del st.session_state.deleting_disease
-                            st.success(f"✅ Deleted '{disease_name}'")
-                            st.rerun()
-                    
-                    with confirm_col2:
-                        if st.button("❌ Cancel Delete", key=f"cancel_delete_{i}"):
-                            del st.session_state.deleting_disease
-                            st.rerun()
+                # Confidence score
+                st.metric("Confidence Score", f"{analysis.confidence_score:.2f}")
                 
-                st.markdown("---")
-    
-    with manage_tab:
-        st.markdown('''
-        <div class="analysis-card">
-            <h3 style="color: #374151; margin-bottom: 1rem;">📦 Configuration Management</h3>
-            <p style="color: #6b7280; margin-bottom: 2rem;">
-                Import and export disease configurations for backup or sharing across systems.
-            </p>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        # Export section
-        st.markdown('''
-        <div class="section-header">
-            <h4>📤 Export Configurations</h4>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        if st.session_state.disease_config:
-            export_data = {
-                "diseases": st.session_state.disease_config,
-                "export_date": datetime.now().isoformat(),
-                "version": "1.0"
-            }
-            
-            config_json = json.dumps(export_data, indent=2)
-            
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                st.download_button(
-                    "💾 Download Configuration Backup",
-                    data=config_json,
-                    file_name=f"disease_config_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json",
-                    use_container_width=True,
-                    help="Download all disease configurations as JSON backup"
-                )
+                # Generate report
+                if st.button("Generate PDF Report"):
+                    report_generator = ReportGenerator()
+                    pdf_content = report_generator.create_pdf_report(analysis)
+                    if pdf_content:
+                        st.download_button(
+                            label="Download PDF Report",
+                            data=pdf_content,
+                            file_name="medical_analysis_report.pdf",
+                            mime="application/pdf"
+                        )
         else:
-            st.info("📋 No configurations to export. Create some disease profiles first.")
-        
-        # Import section
-        st.markdown('''
-        <div class="section-header" style="margin-top: 2rem;">
-            <h4>� Import Configurations</h4>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-        uploaded_config = st.file_uploader(
-            "Upload configuration file:",
-            type=['json'],
-            help="Upload a previously exported configuration backup"
+            st.error("Could not extract text from the PDF file.")
+
+
+def render_disease_prediction_tab(analyzer: MedicalAnalyzer):
+    """Render the disease prediction tab."""
+    st.markdown("### Disease Risk Prediction")
+    st.markdown("Select a disease and enter patient information for ML-based risk assessment.")
+    
+    # Get active diseases
+    active_diseases = disease_manager.get_active_diseases()
+    
+    if not active_diseases:
+        st.warning("No disease prediction models are currently active. Please contact administrator.")
+        return
+    
+    # Disease selection dropdown with default option
+    disease_options = {"Select a disease": None}  # Default option
+    disease_options.update({config.display_name: name for name, config in active_diseases.items()})
+    
+    selected_display_name = st.selectbox(
+        "Select Disease for Prediction",
+        options=list(disease_options.keys()),
+        help="Choose the disease you want to predict risk for"
+    )
+    
+    # Only show form content if a disease is selected
+    if selected_display_name == "Select a disease":
+        st.info("👆 Please select a disease from the dropdown above to begin risk assessment.")
+        return
+    
+    selected_disease_name = disease_options[selected_display_name]
+    selected_config = active_diseases[selected_disease_name]
+    
+    # Show disease info
+    with st.expander("ℹ️ About this prediction model"):
+        st.write(f"**Description:** {selected_config.description}")
+        st.write(f"**Accepted file formats:** {', '.join(selected_config.accepted_formats)}")
+        if selected_disease_name != "diabetes":
+            st.info("This is a placeholder model. Upload functionality will be implemented soon.")
+    
+    # File upload section (for non-diabetes diseases)
+    uploaded_file = None
+    if selected_disease_name != "diabetes":
+        st.markdown("#### File Upload")
+        uploaded_file = st.file_uploader(
+            f"Upload file for {selected_display_name} analysis",
+            type=selected_config.accepted_formats,
+            help=f"Supported formats: {', '.join(selected_config.accepted_formats)}"
         )
         
-        if uploaded_config:
-            try:
-                config_data = json.loads(uploaded_config.read())
-                diseases = config_data.get('diseases', {})
-                
-                if diseases:
-                    st.success(f"✅ Found {len(diseases)} disease configurations")
-                    
-                    # Preview imported configurations
-                    with st.expander("👁️ Preview Import Data"):
-                        for name, config in diseases.items():
-                            st.markdown(f"**{name}:** {config.get('description', 'No description')}")
-                    
-                    import_col1, import_col2 = st.columns(2)
-                    with import_col1:
-                        if st.button("📥 Import All", type="primary", use_container_width=True):
-                            st.session_state.disease_config.update(diseases)
-                            st.success(f"✅ Imported {len(diseases)} configurations!")
-                            st.rerun()
-                    
-                    with import_col2:
-                        if st.button("🔄 Replace All", use_container_width=True):
-                            st.session_state.disease_config = diseases
-                            st.success(f"✅ Replaced with {len(diseases)} configurations!")
-                            st.rerun()
-                else:
-                    st.error("❌ No valid disease configurations found in file")
+        if uploaded_file:
+            st.success(f"File '{uploaded_file.name}' uploaded successfully!")
+            st.info("File processing and prediction will be implemented in the next update.")
+    
+    # Dynamic parameter form - only show when disease is selected
+    with st.form("patient_data_form"):
+        st.markdown("#### Patient Information")
+        
+        # Organize parameters into columns
+        params = selected_config.parameters
+        param_keys = list(params.keys())
+        
+        # Create columns based on number of parameters
+        num_cols = min(3, len(param_keys))
+        if num_cols > 0:
+            cols = st.columns(num_cols)
             
-            except json.JSONDecodeError:
-                st.error("❌ Invalid JSON file format")
-            except Exception as e:
-                st.error(f"❌ Error reading file: {str(e)}")
+            form_data = {}
+            
+            for i, (param_name, param_config) in enumerate(params.items()):
+                col_idx = i % num_cols
+                
+                with cols[col_idx]:
+                    label = param_config.get('label', param_name.replace('_', ' ').title())
+                    help_text = param_config.get('help', '')
+                    
+                    if param_config['type'] == 'number':
+                        value = st.number_input(
+                            label,
+                            min_value=param_config.get('min', 0),
+                            max_value=param_config.get('max', 100),
+                            value=param_config.get('default', 0),
+                            step=param_config.get('step', 1),
+                            help=help_text
+                        )
+                    elif param_config['type'] == 'checkbox':
+                        value = st.checkbox(
+                            label,
+                            value=param_config.get('default', False),
+                            help=help_text
+                        )
+                    elif param_config['type'] == 'selectbox':
+                        options = param_config.get('options', [1, 2, 3, 4, 5])
+                        default_idx = 0
+                        if 'default' in param_config:
+                            try:
+                                default_idx = options.index(param_config['default'])
+                            except ValueError:
+                                default_idx = 0
+                        value = st.selectbox(
+                            label,
+                            options=options,
+                            index=default_idx,
+                            help=help_text
+                        )
+                    else:
+                        value = st.text_input(
+                            label,
+                            value=str(param_config.get('default', '')),
+                            help=help_text
+                        )
+                    
+                    form_data[param_name] = value
         
-        # System information
-        st.markdown('''
-        <div class="section-header" style="margin-top: 2rem;">
-            <h4>ℹ️ System Information</h4>
-        </div>
-        ''', unsafe_allow_html=True)
+        submitted = st.form_submit_button("Predict Risk", type="primary")
         
-        info_col1, info_col2 = st.columns(2)
-        with info_col1:
-            st.metric("Total Diseases", len(st.session_state.disease_config))
-            st.metric("Configuration Version", "1.0")
-        
-        with info_col2:
-            total_file_types = sum(len(config.get('file_types', [])) + 
-                                 len(config.get('image_types', [])) + 
-                                 len(config.get('video_types', []))
-                                 for config in st.session_state.disease_config.values())
-            st.metric("Total File Types", total_file_types)
-            st.metric("Last Modified", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        if submitted:
+            # Handle different disease predictions
+            if selected_disease_name == "diabetes":
+                # Use existing diabetes prediction
+                patient_data = PatientData(**form_data)
+                
+                with st.spinner("Analyzing patient data..."):
+                    prediction = analyzer.predict_disease_risk(patient_data)
+                
+                # Display results
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Prediction", prediction['prediction'])
+                with col2:
+                    st.metric("Risk Score", f"{prediction['risk_score']:.2f}")
+                with col3:
+                    st.metric("Confidence", f"{prediction['confidence']:.2f}")
+                
+                # Recommendations
+                if prediction.get('recommendations'):
+                    st.markdown("#### Recommendations")
+                    for rec in prediction['recommendations']:
+                        st.write(f"• {rec}")
+            else:
+                # Placeholder for other diseases
+                st.success("Form submitted successfully!")
+                st.info(f"Prediction for {selected_display_name} is being processed...")
+                
+                # Show placeholder results
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Status", "Processing")
+                with col2:
+                    st.metric("Model", "Placeholder")
+                with col3:
+                    st.metric("Data Points", len(form_data))
+                
+                st.markdown("#### Next Steps")
+                st.write("• Upload relevant medical files if required")
+                st.write("• Wait for model processing (implementation pending)")
+                st.write("• Review results and recommendations")
+                
+                if uploaded_file:
+                    st.write(f"• Uploaded file: {uploaded_file.name}")
+            
+            # Display results
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Prediction", prediction['prediction'])
+            with col2:
+                st.metric("Risk Score", f"{prediction['risk_score']:.2f}")
+            with col3:
+                st.metric("Confidence", f"{prediction['confidence']:.2f}")
+            
+            # Recommendations
+            if prediction.get('recommendations'):
+                st.markdown("#### Recommendations")
+                for rec in prediction['recommendations']:
+                    st.write(f"• {rec}")
+
+
+def main():
+    """Main application function."""
+    setup_page_config()
+    apply_custom_css()
+    
+    # Initialize analyzer
+    analyzer = MedicalAnalyzer()
+    
+    # Render header
+    render_header()
+    
+    # Add backoffice access
+    if st.sidebar.button("🔧 Admin Panel"):
+        st.session_state.show_backoffice = not st.session_state.get('show_backoffice', False)
+    
+    if st.session_state.get('show_backoffice', False):
+        from backoffice import render_backoffice_page
+        render_backoffice_page()
+        return
+    
+    # Create tabs
+    tab1, tab2 = st.tabs(["Document Analysis", "Disease Prediction"])
+    
+    with tab1:
+        render_document_analysis_tab(analyzer)
+    
+    with tab2:
+        render_disease_prediction_tab(analyzer)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("*Medical AI Analyzer v2.0 - For informational purposes only. Always consult healthcare professionals.*")
 
 
 if __name__ == "__main__":
-    main() 
+    main()
